@@ -3,7 +3,7 @@ oracle/oracle-symbols.tsv
 oracle/sc_lexer/include/
 oracle/sc_lexer/src/
 oracle/sc_lexer_dump
-editors/vscode/node_modules/
-editors/vscode/out/
-editors/vscode/*.vsix
+editors/*/node_modules/
+editors/*/out/
+editors/*/*.vsix
 editors/vscode/server/

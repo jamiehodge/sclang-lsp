@@ -1,8 +1,8 @@
 {
   "name": "sclang-lsp",
   "displayName": "SuperCollider (sclang-lsp)",
-  "description": "Language features for SuperCollider, served by sclang-lsp. No sclang required.",
-  "version": "0.1.0",
+  "description": "Language features for SuperCollider, and an sclang to run it in: evaluation, a post window, and class-library compile errors.",
+  "version": "0.2.2",
   "license": "GPL-3.0-or-later",
   "publisher": "jamiehodge",
   "repository": {
@@ -13,7 +13,8 @@
     "vscode": "^1.75.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Other"
   ],
   "main": "./out/extension.js",
   "activationEvents": [
@@ -44,14 +45,44 @@
     ],
     "commands": [
       {
+        "command": "sclang-lsp.evaluate",
+        "title": "Evaluate selection or block",
+        "category": "SuperCollider"
+      },
+      {
+        "command": "sclang-lsp.eval",
+        "title": "Evaluate code",
+        "category": "SuperCollider"
+      },
+      {
+        "command": "sclang-lsp.startSclang",
+        "title": "Start sclang",
+        "category": "SuperCollider"
+      },
+      {
+        "command": "sclang-lsp.stopSclang",
+        "title": "Stop sclang",
+        "category": "SuperCollider"
+      },
+      {
+        "command": "sclang-lsp.restartSclang",
+        "title": "Restart sclang",
+        "category": "SuperCollider"
+      },
+      {
+        "command": "sclang-lsp.showPost",
+        "title": "Show post window",
+        "category": "SuperCollider"
+      },
+      {
         "command": "sclang-lsp.restart",
         "title": "Restart language server",
-        "category": "sclang-lsp"
+        "category": "SuperCollider"
       },
       {
         "command": "sclang-lsp.showLog",
         "title": "Show server log",
-        "category": "sclang-lsp"
+        "category": "SuperCollider"
       }
     ],
     "configuration": {
@@ -79,16 +110,56 @@
           ],
           "default": "off",
           "description": "Log the traffic between VS Code and the server."
+        },
+        "sclang-lsp.sclang.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Absolute path to the `sclang` binary. When empty, the usual install location for the platform is tried, then `PATH`."
+        },
+        "sclang-lsp.sclang.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Extra arguments for `sclang`, appended after `-i none`. Use `-l` here to point at a `sclang_conf.yaml`. Do not override `-i`: with any IDE name but `none`, sclang never reads stdin and evaluation silently does nothing."
+        },
+        "sclang-lsp.echo": {
+          "type": "boolean",
+          "default": true,
+          "description": "Echo evaluated code into the post window before running it."
+        },
+        "sclang-lsp.compileErrors": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Publish class-library compile errors as diagnostics. These are printed before any image exists, so holding sclang's output is the only way to see them."
         }
       }
-    }
+    },
+    "keybindings": [
+      {
+        "command": "sclang-lsp.evaluate",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "editorTextFocus && editorLangId == supercollider"
+      },
+      {
+        "command": "sclang-lsp.eval",
+        "args": "thisProcess.stop;",
+        "key": "ctrl+.",
+        "mac": "cmd+.",
+        "when": "editorTextFocus && editorLangId == supercollider"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "bundle-server": "node scripts/bundle-server.js",
     "package": "npm run compile && npm run bundle-server && vsce package",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node --test out/test/*.test.js",
+    "e2e": "npm run compile && node scripts/e2e-selection.js && node scripts/e2e-sclang.js"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

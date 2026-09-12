@@ -1,9 +1,13 @@
-// A thin client. The server does the work; this file finds the binary, starts
-// it on stdio, and gets out of the way.
+// The extension: a language client, and an sclang.
 //
-// Deliberately no evaluation, no post window, no server control. Those need a
-// live sclang and are the editor's job rather than the language server's, so
-// they do not belong behind an LSP connection — see ARCHITECTURE.md.
+// The two halves are independent and stay that way. The client finds the
+// server binary, starts it on stdio and gets out of the way; the server never
+// spawns sclang, never talks to one, and does not care whether one exists.
+// Everything below that needs a live sclang goes through `Sclang`, which owns
+// a child process of its own.
+//
+// They meet at exactly one point: deciding what to evaluate is a parsing
+// question, so `region.ts` asks the server for it.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -14,28 +18,36 @@ import {
     ServerOptions,
     TransportKind,
 } from 'vscode-languageclient/node';
+import { CompileErrors } from './diagnostics';
+import { regionAt } from './region';
+import { Sclang } from './sclang';
 
 let client: LanguageClient | undefined;
+
+/** How long the evaluated region stays highlighted. */
+const FLASH_MS = 250;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     context.subscriptions.push(
         vscode.commands.registerCommand('sclang-lsp.restart', () => restart(context)),
         vscode.commands.registerCommand('sclang-lsp.showLog', () => client?.outputChannel.show()),
         vscode.workspace.onDidChangeConfiguration(async (event) => {
-            // Every setting here feeds the server's startup, so none of them
-            // can take effect without a restart.
-            if (event.affectsConfiguration('sclang-lsp')) {
+            // Only the server's own settings feed its startup; the sclang ones
+            // are read fresh each time it is launched.
+            if (
+                event.affectsConfiguration('sclang-lsp.server') ||
+                event.affectsConfiguration('sclang-lsp.classLibraryPaths')
+            ) {
                 await restart(context);
             }
         }),
     );
 
+    registerSclang(context);
     await start(context);
 }
 
-export function deactivate(): Promise<void> | undefined {
-    return client?.stop();
-}
+// ---- the language client ---------------------------------------------
 
 async function start(context: vscode.ExtensionContext): Promise<void> {
     const server = resolveServer(context);
@@ -68,6 +80,10 @@ async function restart(context: vscode.ExtensionContext): Promise<void> {
     await start(context);
 }
 
+export function deactivate(): Promise<void> | undefined {
+    return client?.stop();
+}
+
 function initializationOptions(): Record<string, unknown> {
     const paths = vscode.workspace
         .getConfiguration('sclang-lsp')
@@ -78,6 +94,88 @@ function initializationOptions(): Record<string, unknown> {
     // array would mean "index nothing" rather than "use the defaults".
     return paths.length > 0 ? { classLibraryPaths: paths } : {};
 }
+
+// ---- running code ----------------------------------------------------
+
+function registerSclang(context: vscode.ExtensionContext): void {
+    const sclang = new Sclang();
+    const errors = new CompileErrors();
+    const flash = vscode.window.createTextEditorDecorationType({
+        backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
+    });
+
+    context.subscriptions.push(
+        sclang,
+        errors,
+        flash,
+
+        sclang.onOutput((chunk) => {
+            if (vscode.workspace.getConfiguration('sclang-lsp').get<boolean>('compileErrors', true)) {
+                errors.feed(chunk);
+            }
+        }),
+
+        vscode.commands.registerCommand('sclang-lsp.startSclang', () => guard(sclang.start())),
+        vscode.commands.registerCommand('sclang-lsp.stopSclang', () => guard(sclang.stop())),
+        vscode.commands.registerCommand('sclang-lsp.restartSclang', () => guard(sclang.restart())),
+        vscode.commands.registerCommand('sclang-lsp.showPost', () => sclang.show()),
+
+        // One command taking the code to run, so a user can bind whatever they
+        // want — boot, quit, recompile — without the extension having an
+        // opinion about which of those deserve to be commands of their own.
+        vscode.commands.registerCommand('sclang-lsp.eval', (code: unknown) => {
+            if (typeof code !== 'string' || code.trim().length === 0) {
+                void vscode.window.showErrorMessage(
+                    'sclang-lsp.eval needs the code to run, passed as the keybinding\'s "args".',
+                );
+                return;
+            }
+            guard(sclang.evaluate(code));
+        }),
+
+        vscode.commands.registerCommand('sclang-lsp.evaluate', async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                return;
+            }
+
+            const region = await regionAt(editor);
+            if (!region) {
+                return;
+            }
+
+            editor.setDecorations(flash, [region.range]);
+            setTimeout(() => editor.setDecorations(flash, []), FLASH_MS);
+
+            await guard(
+                sclang.evaluate(region.text, {
+                    line: region.range.start.line,
+                    label: summarise(region.text),
+                }),
+            );
+        }),
+    );
+}
+
+/**
+ * A failure to start sclang is already reported where it happens, and an
+ * unhandled rejection here would surface as a second, less useful message.
+ */
+async function guard(work: Promise<void>): Promise<void> {
+    try {
+        await work;
+    } catch {
+        // Reported at the source.
+    }
+}
+
+/** What to echo into the post window for a multi-line region. */
+function summarise(code: string): string {
+    const lines = code.split('\n');
+    return lines.length > 1 ? `${lines[0].trim()} … (${lines.length} lines)` : code.trim();
+}
+
+// ---- finding the server ----------------------------------------------
 
 interface Resolved {
     command?: string;
