@@ -18,7 +18,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -32,7 +32,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # Pinned, not `stable`: each clippy release adds lints, and two of the
       # ones current today would push the MSRV up on code that has not
       # changed. A toolchain bump should be a deliberate commit, not a
@@ -45,7 +45,9 @@ jobs:
       - run: cargo fmt --all --check
 
       # Strict on the server, which is clean and should stay that way.
-      - run: cargo clippy -p sclang-lsp --all-targets -- -D warnings
+      # `--no-deps` matters here: without it `-p` still lints workspace path
+      # dependencies, so sclang-syntax's known warnings become hard errors.
+      - run: cargo clippy -p sclang-lsp --all-targets --no-deps -- -D warnings
 
       # Advisory on the rest: sclang-syntax carries three known warnings, two
       # of which only newer APIs would silence. Reported in the log, not a gate.
