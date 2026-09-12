@@ -29,6 +29,9 @@ No configuration is needed while developing: the extension looks for
 `target/release/sclang-lsp` (then `target/debug`) in the checkout it lives in
 before falling back to `PATH`.
 
+[`sample.scd`](sample.scd) is a guided tour of every feature, in order, with a
+deliberate syntax error at the end for the diagnostics.
+
 ## Installing it
 
 To use it in your normal editor rather than a development window:
