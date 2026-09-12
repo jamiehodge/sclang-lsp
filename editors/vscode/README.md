@@ -10,9 +10,7 @@ broken, or busy — including on a class library that does not compile.
 **It does not run SuperCollider code.** No evaluation, no post window, no
 server control. Those need a live sclang and belong to the editor rather than
 to a language server, so this extension is for reading and navigating code, not
-for playing it. It is currently either/or with `vscode-supercollider`: both
-contribute the `supercollider` language, so enabling the two means two servers
-answering every request.
+for playing it.
 
 ## Running it locally
 
@@ -57,9 +55,9 @@ to set `sclang-lsp.server.path` by hand. Bundling makes the VSIX specific to
 the platform it was built on, which is what the per-target release artifacts
 exist for.
 
-> **Disable `vscode-supercollider` first.** Both extensions contribute the
-> `supercollider` language, so with both enabled two servers answer every
-> request and you get duplicate completions and hovers.
+> **Disable any other SuperCollider extension first.** Two extensions
+> contributing the `supercollider` language means two servers answering every
+> request, and duplicate completions and hovers.
 
 ## Settings
 
@@ -85,14 +83,14 @@ or set to `onUnlessPressed`. They need no cursor and appear on their own.
 ## What it does not do
 
 No evaluation, no post window, no server control. Running code is not in the
-LSP's remit — every other ecosystem puts execution in the editor, and
-`vscode-supercollider` routes it through a custom `textDocument/evaluateSelection`
-method only because its server already lived inside sclang with a connection
-open. That is an accident of its architecture, not a design to copy.
+LSP's remit — every other ecosystem puts execution in the editor. The quark
+routes it through a custom `textDocument/evaluateSelection` method only because
+its server already lived inside sclang with a connection open, which is an
+accident of that architecture rather than a design to copy.
 
-**Do not enable this alongside `vscode-supercollider`.** Both contribute the
-`supercollider` language, so you would get two servers answering and duplicate
-completions and hovers.
+**Do not enable this alongside another SuperCollider extension.** Two
+extensions contributing the `supercollider` language means two servers
+answering, and duplicate completions and hovers.
 
 ## Licensing
 

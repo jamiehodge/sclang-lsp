@@ -58,9 +58,9 @@ to one.
 
 In Neovim and Emacs that makes it the missing half: `scnvim` and `scel` already
 manage an sclang and provide no language intelligence, so the two sit side by
-side without overlapping. In VS Code it is currently either/or, because
-`vscode-supercollider` contributes the `supercollider` language itself and two
-extensions claiming it means two servers answering every request.
+side without overlapping. Anything else that already contributes the
+`supercollider` language will collide with it, since two clients claiming a
+language means two servers answering every request.
 
 ## Status
 
