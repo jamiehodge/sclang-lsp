@@ -164,10 +164,46 @@ env-var hook so class-library compilation emits each file's parse tree.
 SCLANG_DUMP_PARSE=1 <build>/lang/sclang -a -l conf.yaml -i none quit.scd
 ```
 
-That produces 1,207 parse trees for the core class library. It is the only
-oracle that can validate expression *structure* — the symbol oracle sees
-declarations only. Consuming it still needs a translation layer, since sclang's
-IR is shaped for a code generator rather than as a CST.
+```bash
+cargo run --release --example tree_oracle -- dump.log
+```
+
+```
+methods compared : 8,614
+selector sequences identical: 8,063 / 8,614 (93.60%)
+```
+
+Node-for-node comparison is impossible — the IR is desugared for a code
+generator. What compares is the **pre-order sequence of selectors** in each
+method body, which is sensitive to the thing that matters: `(1 + 2) * 3` emits
+`*` then `+`, while `1 + (2 * 3)` emits `+` then `*`. Making the parser
+right-associative drops this from 93.60% to 91.04% and fails the precedence
+unit test.
+
+Reaching it needs a translation layer for the rewrites sclang performs while
+parsing, each verified against the dump directly:
+
+| source | sclang emits |
+|---|---|
+| `arr[3]` | `Call 'at'` |
+| `arr[3] = 9` | `Call 'put'` |
+| `arr[1..3]` | `Call 'copySeries'` |
+| `(1..10)` | `Call 'prSimpleNumberSeries'` |
+| `Point(1, 2)` | `Call 'new'` |
+| `f(*args)` | `Call 'performList'` |
+| `super.f(*args)` | `Call 'superPerformList'` |
+| `obj.bar = 7` | nothing |
+
+**Two limits worth stating plainly.** sclang compiles `{ }` literals during
+parsing, so their parse nodes never reach the dump — there is not one `Func`
+line in the whole class library. Block interiors are therefore unvalidated, and
+SuperCollider is mostly blocks. And the remaining 6% is dominated by further
+rewrites rather than parser disagreements, so past a point this measures the
+translation layer rather than the parser.
+
+Patching also fixed a bug in sclang's own dumper: `PyrMethodNode::dump` and
+`PyrBlockNode::dump` never emitted `mVarlist`, so `var x = ...` initialisers
+were invisible. Bit-rot in code that has had no caller for years.
 
 ## Stability properties
 

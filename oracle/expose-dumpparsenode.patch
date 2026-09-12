@@ -1,3 +1,27 @@
+diff --git a/lang/LangSource/DumpParseNode.cpp b/lang/LangSource/DumpParseNode.cpp
+index b62761f..4157fc5 100644
+--- a/lang/LangSource/DumpParseNode.cpp
++++ b/lang/LangSource/DumpParseNode.cpp
+@@ -81,6 +81,9 @@ void PyrMethodNode::dump(int level) {
+     postfl("%2d MethodNode '%s'  %s\n", level, slotRawSymbol(&mMethodName->mSlot)->name,
+            mPrimitiveName ? slotRawSymbol(&mPrimitiveName->mSlot)->name : "");
+     DUMPNODE(mArglist, level + 1);
++    // Variable declarations were omitted here, so a method's `var x = ...`
++    // initialisers never appeared in the dump.
++    DUMPNODE(mVarlist, level + 1);
+     DUMPNODE(mBody, level + 1);
+     DUMPNODE(mNext, level);
+ }
+@@ -208,6 +211,9 @@ void PyrLitListNode::dump(int level) {
+ void PyrBlockNode::dump(int level) {
+     postfl("%2d Func\n", level);
+     DUMPNODE(mArglist, level + 1);
++    // Variable declarations were omitted here, so a method's `var x = ...`
++    // initialisers never appeared in the dump.
++    DUMPNODE(mVarlist, level + 1);
+     DUMPNODE(mBody, level + 1);
+     DUMPNODE(mNext, level);
+ }
 diff --git a/lang/LangSource/PyrLexer.cpp b/lang/LangSource/PyrLexer.cpp
 index 3ea9b7e..c4a29fb 100644
 --- a/lang/LangSource/PyrLexer.cpp
