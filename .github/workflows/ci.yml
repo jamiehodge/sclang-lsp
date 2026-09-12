@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # No SuperCollider install anywhere in this job. The suite is hermetic:
+      # every test that needs a class library builds one in a temp directory
+      # and passes it as `classLibraryPaths`, so the platform defaults are
+      # never consulted. That is the layering rule from ARCHITECTURE.md
+      # enforced by the CI environment itself.
+      - run: cargo test --workspace
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned, not `stable`: each clippy release adds lints, and two of the
+      # ones current today would push the MSRV up on code that has not
+      # changed. A toolchain bump should be a deliberate commit, not a
+      # surprise red build on an unrelated PR.
+      - uses: dtolnay/rust-toolchain@1.98
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt --all --check
+
+      # Strict on the server, which is clean and should stay that way.
+      - run: cargo clippy -p sclang-lsp --all-targets -- -D warnings
+
+      # Advisory on the rest: sclang-syntax carries three known warnings, two
+      # of which only newer APIs would silence. Reported in the log, not a gate.
+      - run: cargo clippy --workspace --all-targets
