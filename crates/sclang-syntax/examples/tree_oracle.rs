@@ -115,18 +115,20 @@ fn read_dump(text: &str) -> BTreeMap<String, Methods> {
 /// | `arr[1..3]`       | `Call 'copySeries'` |
 /// | `(1..10)`         | `Call 'prSimpleNumberSeries'` |
 /// | `super.f(*args)`  | `Call 'superPerformList'` |
+/// | `f.(1)`           | `Call 'value'`      |
+/// | `~x`              | `Call 'envirGet'`   |
+/// | `~x = 5`          | `Call 'envirPut'`   |
 fn selectors(node: &SyntaxNode, source: &str, out: &mut Vec<String>) {
-    // sclang compiles `{ }` literals to FunctionDef objects *during* parsing,
-    // so their parse nodes are gone by the time the tree is dumped — there is
-    // not one `Func` line in the whole class library. The oracle therefore
-    // cannot see inside a block, and comparing what it cannot see would only
-    // manufacture disagreements. Block interiors are left unvalidated, and
-    // said so in the summary.
-    if node.kind == SyntaxKind::FunctionBlock {
-        return;
-    }
     match node.kind {
         SyntaxKind::MethodCall => {
+            // `f.(1)` has no selector after the dot; sclang calls it `value`.
+            if after_dot(node, source).is_none()
+                && node.child_tokens().any(|t| t.kind == SyntaxKind::Dot)
+            {
+                out.push("value".to_string());
+                descend(node, source, out);
+                return;
+            }
             if let Some(name) = after_dot(node, source) {
                 // `f(*args)` becomes `performList`, the selector moving into
                 // an argument — `superPerformList` when the receiver is
@@ -154,8 +156,16 @@ fn selectors(node: &SyntaxNode, source: &str, out: &mut Vec<String>) {
         SyntaxKind::CallExpr => {
             if let Some(Child::Node(first)) = node.children.first() {
                 match first.kind {
-                    // `Point(1, 2)` is an implicit `new` on the class.
-                    SyntaxKind::ClassRef => out.push("new".to_string()),
+                    // `Point(1, 2)` is an implicit `new` on the class, and
+                    // `Point(*args)` expands like any other call.
+                    SyntaxKind::ClassRef => out.push(
+                        if has_splat(node) {
+                            "performList"
+                        } else {
+                            "new"
+                        }
+                        .to_string(),
+                    ),
                     SyntaxKind::NameRef => {
                         if let Some(t) = first.child_tokens().find(|t| !t.kind.is_trivia()) {
                             let name = t.text(source).to_string();
@@ -170,6 +180,11 @@ fn selectors(node: &SyntaxNode, source: &str, out: &mut Vec<String>) {
                 }
             }
             descend(node, source, out);
+            return;
+        }
+        // `~x` is an environment lookup.
+        SyntaxKind::EnvVarRef => {
+            out.push("envirGet".to_string());
             return;
         }
         // `arr[3]` is `at`; a subrange `arr[1..3]` is `copySeries`.
@@ -199,6 +214,16 @@ fn selectors(node: &SyntaxNode, source: &str, out: &mut Vec<String>) {
                                 selectors(n, source, out);
                             }
                         }
+                        for c in node.children.iter().skip(1) {
+                            if let Child::Node(n) = c {
+                                selectors(n, source, out);
+                            }
+                        }
+                        return;
+                    }
+                    // `~x = 5` is an environment store, not a read.
+                    SyntaxKind::EnvVarRef => {
+                        out.push("envirPut".to_string());
                         for c in node.children.iter().skip(1) {
                             if let Child::Node(n) = c {
                                 selectors(n, source, out);
@@ -341,6 +366,7 @@ fn main() {
     let dump = read_dump(&text);
 
     let (mut files, mut methods, mut agreed) = (0usize, 0usize, 0usize);
+    let mut selector_total = 0usize;
     let mut only_theirs = 0usize;
     let mut diffs: BTreeMap<String, usize> = BTreeMap::new();
     let mut samples: Vec<String> = Vec::new();
@@ -354,6 +380,7 @@ fn main() {
 
         for (key, their_sels) in theirs {
             methods += 1;
+            selector_total += their_sels.len();
             let Some(my_sels) = mine.get(key) else {
                 only_theirs += 1;
                 continue;
@@ -383,14 +410,11 @@ fn main() {
 
     println!("files            : {files}");
     println!("methods compared : {methods}");
+    println!("selectors compared: {selector_total}");
     println!("not found in ours: {only_theirs}");
     println!(
         "selector sequences identical: {agreed} / {methods} ({:.2}%)",
         100.0 * agreed as f64 / methods.max(1) as f64
-    );
-    println!(
-        "\nScope: method-body structure outside `{{ }}` literals. sclang compiles\n\
-         blocks during parsing, so their parse nodes never reach the dump."
     );
 
     if !diffs.is_empty() {

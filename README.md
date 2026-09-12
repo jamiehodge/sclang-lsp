@@ -169,15 +169,16 @@ cargo run --release --example tree_oracle -- dump.log
 ```
 
 ```
-methods compared : 8,614
-selector sequences identical: 8,063 / 8,614 (93.60%)
+methods compared  : 8,633
+selectors compared: 66,649
+selector sequences identical: 8,054 / 8,633 (93.29%)
 ```
 
 Node-for-node comparison is impossible — the IR is desugared for a code
 generator. What compares is the **pre-order sequence of selectors** in each
 method body, which is sensitive to the thing that matters: `(1 + 2) * 3` emits
 `*` then `+`, while `1 + (2 * 3)` emits `+` then `*`. Making the parser
-right-associative drops this from 93.60% to 91.04% and fails the precedence
+right-associative drops this from 93.29% to 89.29% and fails the precedence
 unit test.
 
 Reaching it needs a translation layer for the rewrites sclang performs while
@@ -193,17 +194,24 @@ parsing, each verified against the dump directly:
 | `f(*args)` | `Call 'performList'` |
 | `super.f(*args)` | `Call 'superPerformList'` |
 | `obj.bar = 7` | nothing |
+| `f.(1)` | `Call 'value'` |
+| `~x` / `~x = 5` | `Call 'envirGet'` / `'envirPut'` |
 
-**Two limits worth stating plainly.** sclang compiles `{ }` literals during
-parsing, so their parse nodes never reach the dump — there is not one `Func`
-line in the whole class library. Block interiors are therefore unvalidated, and
-SuperCollider is mostly blocks. And the remaining 6% is dominated by further
-rewrites rather than parser disagreements, so past a point this measures the
-translation layer rather than the parser.
+The remaining 7% is dominated by further rewrites rather than parser
+disagreements — `asStream`, `deprecated`, and similar — so past this point the
+tool measures the translation layer rather than the parser.
 
-Patching also fixed a bug in sclang's own dumper: `PyrMethodNode::dump` and
-`PyrBlockNode::dump` never emitted `mVarlist`, so `var x = ...` initialisers
-were invisible. Bit-rot in code that has had no caller for years.
+### Two bugs in sclang's own dumper
+
+Both are bit-rot in code that has had no caller for years, and both had to be
+fixed before the oracle was worth anything:
+
+- `PyrMethodNode::dump` and `PyrBlockNode::dump` never emitted `mVarlist`, so
+  `var x = this.foo` initialisers were invisible.
+- `dumpPushLit` read its slot with `slotRawObject` where `newPyrPushLitNode`
+  had filled it with `SetPtr` — the wrong union member. Function literals
+  therefore never dumped at all: zero `Func` lines in the whole class library.
+  Fixing it yields 13,400, and block interiors became comparable.
 
 ## Stability properties
 
