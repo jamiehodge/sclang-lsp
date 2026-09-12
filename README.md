@@ -170,15 +170,16 @@ cargo run --release --example tree_oracle -- dump.log
 
 ```
 methods compared  : 9,731
-selectors compared: 53,670
-selector sequences identical: 9,721 / 9,731 (99.90%)
+selectors compared: 53,684
+selector sequences identical: 9,731 / 9,731 (100.00%)
 ```
 
 Node-for-node comparison is impossible — the IR is desugared for a code
 generator. What compares is the **pre-order sequence of selectors** in each
 method body, which is sensitive to the thing that matters: `(1 + 2) * 3` emits
 `*` then `+`, while `1 + (2 * 3)` emits `+` then `*`. Making the parser
-right-associative drops it sharply and fails the precedence unit test.
+right-associative drops it to 95.68%; emitting a selector after its arguments
+instead of before drops it to 59.73%.
 
 Reaching it needs a translation layer for the rewrites sclang performs while
 parsing, each verified against the dump directly:
@@ -198,11 +199,10 @@ parsing, each verified against the dump directly:
 | `arr[1..2] = x` | `Call 'putSeries'` |
 | `Set[1, 2]` | a literal, no call |
 
-The ten methods that still differ have long sequences that agree for dozens of
-selectors before diverging slightly, mostly around `!?`. Telling a further
-sclang quirk from a real parse difference there needs reading each case.
+Every divergence found along the way turned out to be a bug in sclang's
+dumper rather than in this parser.
 
-### Four bugs in sclang's own dumper
+### Five bugs in sclang's own dumper
 
 All bit-rot in code that has had no caller for years, and all had to be fixed
 before the oracle was worth anything:
@@ -218,6 +218,9 @@ before the oracle was worth anything:
   partway along it. Dumping the defs directly fixes it.
 - `PyrMethodNode::dump` never printed `mIsClassMethod`, so `*make` and `make`
   were indistinguishable — and classes routinely have both.
+- `PyrCurryArgNode::dump` never dumped its `mNext`, alone among node types, so
+  an argument list was truncated at the first `_` and everything after it
+  vanished. This accounted for the last ten disagreements.
 
 ## Stability properties
 

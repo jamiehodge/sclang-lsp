@@ -1,8 +1,22 @@
 diff --git a/lang/LangSource/DumpParseNode.cpp b/lang/LangSource/DumpParseNode.cpp
-index b62761f..2e63b4f 100644
+index b62761f..5e20977 100644
 --- a/lang/LangSource/DumpParseNode.cpp
 +++ b/lang/LangSource/DumpParseNode.cpp
-@@ -78,9 +78,22 @@ void PyrClassNode::dump(int level) {
+@@ -40,7 +40,12 @@ void dumpNodeList(PyrParseNode* node) {
+     }
+ }
+ 
+-void PyrCurryArgNode::dump(int level) { postfl("%2d CurryArg %d\n", level, mArgNum); }
++void PyrCurryArgNode::dump(int level) {
++    postfl("%2d CurryArg %d\n", level, mArgNum);
++    // Every other node dumps its mNext; this one did not, so an argument list
++    // was truncated at the first `_` and everything after it vanished.
++    DUMPNODE(mNext, level);
++}
+ 
+ void PyrSlotNode::dump(int level) {
+     if (mClassno == pn_PushLitNode)
+@@ -78,9 +83,22 @@ void PyrClassNode::dump(int level) {
  }
  
  void PyrMethodNode::dump(int level) {
@@ -26,7 +40,7 @@ index b62761f..2e63b4f 100644
      DUMPNODE(mBody, level + 1);
      DUMPNODE(mNext, level);
  }
-@@ -132,7 +145,10 @@ void PyrSlotNode::dumpPushLit(int level) {
+@@ -132,7 +150,10 @@ void PyrSlotNode::dumpPushLit(int level) {
      if (!IsPtr(&mSlot))
          dumpPyrSlot(&mSlot);
      else {
@@ -38,7 +52,7 @@ index b62761f..2e63b4f 100644
      }
  }
  
-@@ -141,7 +157,10 @@ void PyrSlotNode::dumpLiteral(int level) {
+@@ -141,7 +162,10 @@ void PyrSlotNode::dumpLiteral(int level) {
      if (!IsPtr(&mSlot))
          dumpPyrSlot(&mSlot);
      else {
@@ -50,7 +64,7 @@ index b62761f..2e63b4f 100644
      }
  }
  
-@@ -208,6 +227,15 @@ void PyrLitListNode::dump(int level) {
+@@ -208,6 +232,15 @@ void PyrLitListNode::dump(int level) {
  void PyrBlockNode::dump(int level) {
      postfl("%2d Func\n", level);
      DUMPNODE(mArglist, level + 1);
