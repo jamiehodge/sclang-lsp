@@ -53,7 +53,8 @@ that keeps it honest.
 - [x] Differential oracles — token-for-token against sclang's own lexer,
       symbol-for-symbol against its compiled class library
 - [x] Symbol index — classes, methods, args, accessors, docs
-- [x] LSP server — diagnostics, completion, hover, goto-definition, symbols
+- [x] LSP server — diagnostics, completion, signature help, hover,
+      goto-definition, symbols
 
 ## The server
 
@@ -65,7 +66,8 @@ crate spawns or contacts a running image.
 | Request | Behaviour |
 |---|---|
 | `publishDiagnostics` | Parser errors, per keystroke |
-| `completion` | Class names; class-side methods after `Foo.`, inherited ones included; every selector otherwise |
+| `completion` | Names in scope first — arguments, `var`s, instance variables — then class names, class-side methods after `Foo.` with inherited ones included, or every selector when the receiver is unknown |
+| `signatureHelp` | The signature of the call being typed, with the parameter under the cursor marked. A `name:` argument selects its own parameter rather than its position |
 | `hover` | Signature, superclass chain, and the comment above the definition |
 | `definition` | Exact for a class name or a class receiver; every implementor otherwise |
 | `documentSymbol` | Classes with their methods nested |
@@ -117,8 +119,10 @@ result in the checkout it ships in. See its
 ### What it will not do
 
 No type inference, so `x.foo` offers every class defining `foo` rather than
-guessing which `x` is. `~envir` contents, SCDoc rendering and evaluation are
-all tier 2 and absent. See "Deliberately not done" in ARCHITECTURE.md.
+guessing which `x` is — and signature help lists every implementor's signature
+for the same reason. No references, rename, inlay hints or semantic tokens yet.
+`~envir` contents, SCDoc rendering and evaluation are all tier 2 and absent.
+See "Deliberately not done" in ARCHITECTURE.md.
 
 ### The test that keeps the layering honest
 

@@ -30,6 +30,64 @@ impl<'a> TokenPath<'a> {
     }
 }
 
+/// Every node containing `offset`, outermost first.
+///
+/// The end is inclusive, because a cursor at the end of an unclosed block is
+/// still inside it — which is the usual state of a buffer being typed into.
+pub fn ancestors_at(root: &SyntaxNode, offset: u32) -> Vec<&SyntaxNode> {
+    let mut out = Vec::new();
+    let mut node = root;
+    if offset < node.start || offset > node.end {
+        return out;
+    }
+    loop {
+        out.push(node);
+        let next = node
+            .child_nodes()
+            .find(|n| n.start <= offset && offset <= n.end);
+        match next {
+            Some(child) => node = child,
+            None => return out,
+        }
+    }
+}
+
+/// Move an offset back over trivia to the end of the code before it.
+///
+/// Trailing whitespace belongs to whichever node the parser was building when
+/// it ran out of code, which is usually an ancestor of the interesting one:
+/// with the cursor after `SinOsc.ar(440, ` the argument list ends at the comma
+/// and only the file contains the offset. Stepping back lands inside the call
+/// again, which is where the user plainly is.
+///
+/// An offset already inside a real token is returned untouched.
+pub fn skip_trivia_back(root: &SyntaxNode, offset: u32) -> u32 {
+    let mut last_end = None;
+    let mut found = None;
+
+    visit_tokens(root, &mut |token| {
+        if found.is_some() || token.kind.is_trivia() {
+            return;
+        }
+        if token.start < offset && offset <= token.end {
+            found = Some(offset);
+        } else if token.end <= offset {
+            last_end = Some(token.end);
+        }
+    });
+
+    found.or(last_end).unwrap_or(offset)
+}
+
+fn visit_tokens(node: &SyntaxNode, f: &mut impl FnMut(&Token)) {
+    for child in &node.children {
+        match child {
+            Child::Node(n) => visit_tokens(n, f),
+            Child::Token(t) => f(t),
+        }
+    }
+}
+
 /// Which token an offset should be attributed to when it falls on a boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Bias {

@@ -7,6 +7,7 @@
 
 use crate::analysis::{token_at, Bias, Receiver};
 use crate::documents::Document;
+use crate::scope::{locals_at, Local, LocalKind};
 use sclang_index::{Method, MethodKind, SymbolIndex};
 use sclang_syntax::{Child, SyntaxKind, SyntaxNode};
 
@@ -141,7 +142,21 @@ pub fn completion(doc: &Document, index: &SymbolIndex, offset: u32) -> Completio
             }
         },
         Context::Bare { prefix } => {
+            // Names the user wrote themselves come first. Before this, typing
+            // `fr` inside a method that declares `freq` offered sixty global
+            // selectors and not the one name actually in scope.
+            for local in locals_at(&doc.parse().root, &doc.text, offset) {
+                if local.name.starts_with(&prefix) {
+                    items.push(local_item(&local));
+                }
+            }
+            let before = items.len();
             truncated = push_selectors_by_name(index, &prefix, &mut items);
+            // Rank the two groups rather than letting the client interleave
+            // them alphabetically, which would bury a local among globals.
+            for (i, item) in items.iter_mut().enumerate() {
+                item.sort_text = Some(format!("{}{}", if i < before { 0 } else { 1 }, item.label));
+            }
         }
         Context::Nothing => {}
     }
@@ -180,6 +195,23 @@ fn push_selectors_by_name(
         items.push(item);
     }
     false
+}
+
+fn local_item(local: &Local) -> CompletionItem {
+    let detail = match &local.default {
+        Some(default) => format!("{} = {}", local.kind.describe(), default),
+        None => local.kind.describe().to_string(),
+    };
+    CompletionItem {
+        label: local.name.clone(),
+        kind: Some(match local.kind {
+            LocalKind::Argument | LocalKind::Variable => CompletionItemKind::VARIABLE,
+            LocalKind::InstanceVar | LocalKind::ClassVar => CompletionItemKind::FIELD,
+            LocalKind::Constant => CompletionItemKind::CONSTANT,
+        }),
+        detail: Some(detail),
+        ..Default::default()
+    }
 }
 
 fn method_item(m: &Method, on_class: Option<&str>) -> CompletionItem {
@@ -320,5 +352,48 @@ mod tests {
         let index = index_of(&[("lib.sc", "A { }")]);
         let doc = Document::new("   ".into(), 1);
         assert!(labels(&completion(&doc, &index, 2)).is_empty());
+    }
+
+    #[test]
+    fn locals_come_before_globals() {
+        let index = index_of(&[("lib.sc", "A { frac { ^1 } fragment { ^2 } }")]);
+        let doc = Document::new("T { m { |freq = 440| ^fr } }".into(), 1);
+        let offset = doc.text.find("^fr").unwrap() as u32 + 3;
+        let response = completion(&doc, &index, offset);
+        let CompletionResponse::List(list) = response else {
+            panic!("expected a list");
+        };
+
+        let freq = list
+            .items
+            .iter()
+            .find(|i| i.label == "freq")
+            .expect("the argument in scope");
+        assert_eq!(freq.detail.as_deref(), Some("argument = 440"));
+
+        // Sorted, the argument must land above the global selectors that
+        // merely share its prefix.
+        let mut sorted = list.items.clone();
+        sorted.sort_by_key(|i| i.sort_text.clone().unwrap_or_else(|| i.label.clone()));
+        assert_eq!(sorted[0].label, "freq");
+        assert!(sorted.iter().any(|i| i.label == "frac"));
+    }
+
+    #[test]
+    fn locals_are_not_offered_after_a_dot() {
+        // `x.fr` is a message send; a local named `freq` is not a candidate.
+        let index = index_of(&[("lib.sc", "A { frac { ^1 } }")]);
+        let doc = Document::new("T { m { |freq| ^x.fr } }".into(), 1);
+        let offset = doc.text.find("x.fr").unwrap() as u32 + 4;
+        let CompletionResponse::List(list) = completion(&doc, &index, offset) else {
+            panic!("expected a list");
+        };
+        let got = list
+            .items
+            .iter()
+            .map(|i| i.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(got.contains(&"frac"), "{got:?}");
+        assert!(!got.contains(&"freq"), "{got:?}");
     }
 }

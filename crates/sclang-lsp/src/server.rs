@@ -133,6 +133,12 @@ impl Server {
                 let (doc, offset) = s.locate(&p.text_document_position)?;
                 Some(features::completion::completion(doc, &s.index, offset))
             }),
+            request::SignatureHelpRequest::METHOD => {
+                self.handle::<request::SignatureHelpRequest>(req, |s, p| {
+                    let (doc, offset) = s.locate(&p.text_document_position_params)?;
+                    features::signature_help::signature_help(doc, &s.index, offset)
+                })
+            }
             request::HoverRequest::METHOD => self.handle::<request::HoverRequest>(req, |s, p| {
                 let (doc, offset) = s.locate(&p.text_document_position_params)?;
                 features::hover::hover(doc, &s.index, offset, s.enc)
@@ -402,6 +408,12 @@ pub fn capabilities(enc: PositionEncoding) -> ServerCapabilities {
             // `.` is the only character that changes what completion means.
             trigger_characters: Some(vec![".".to_string()]),
             ..Default::default()
+        }),
+        signature_help_provider: Some(SignatureHelpOptions {
+            // `(` opens a call; `,` moves to the next parameter.
+            trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+            retrigger_characters: Some(vec![",".to_string()]),
+            work_done_progress_options: Default::default(),
         }),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),

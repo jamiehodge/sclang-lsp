@@ -9,5 +9,6 @@ pub mod documents;
 pub mod features;
 pub mod line_index;
 pub mod locations;
+pub mod scope;
 pub mod server;
 pub mod workspace;

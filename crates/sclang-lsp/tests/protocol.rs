@@ -272,3 +272,48 @@ fn an_unknown_request_is_an_error_not_a_crash() {
     let hover: Option<Hover> = h.request_at("textDocument/hover", &uri, 0, 2);
     assert!(hover.is_some());
 }
+
+#[test]
+fn signature_help_describes_the_call_being_typed() {
+    let mut h = Harness::start("sighelp", &mini_library());
+    let uri = h.open("Test.scd", "SinOsc.ar(440, ");
+
+    // Character 15 is the end of the line, in the space after the comma.
+    let help: SignatureHelp = h.request_at("textDocument/signatureHelp", &uri, 0, 15);
+    assert_eq!(help.signatures.len(), 1);
+    assert_eq!(
+        help.signatures[0].label,
+        "SinOsc.*ar(freq = 440, phase = 0, mul = 1, add = 0)"
+    );
+    // One comma behind the cursor, so the second parameter is active.
+    assert_eq!(help.active_parameter, Some(1));
+}
+
+#[test]
+fn completion_offers_names_declared_in_the_enclosing_method() {
+    let mut h = Harness::start("locals", &mini_library());
+    let uri = h.open(
+        "Mine.sc",
+        "Mine : Object {\n\tvar <count;\n\trun { |freq = 440|\n\t\tvar scaled = 1;\n\t\t^f\n\t}\n}\n",
+    );
+    let _ = h.await_diagnostics(&uri);
+
+    // Line 4 is `\t\t^f`; the cursor sits after the `f`.
+    let response: CompletionResponse = h.request_at("textDocument/completion", &uri, 4, 4);
+    let CompletionResponse::List(list) = response else {
+        panic!("expected a list");
+    };
+    let labels: Vec<&str> = list.items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        labels.contains(&"freq"),
+        "the argument in scope: {labels:?}"
+    );
+
+    // And it outranks anything global that merely shares the prefix.
+    let mut sorted = list.items.clone();
+    sorted.sort_by_key(|i| i.sort_text.clone().unwrap_or_else(|| i.label.clone()));
+    assert_eq!(sorted[0].label, "freq");
+
+    let freq = list.items.iter().find(|i| i.label == "freq").unwrap();
+    assert_eq!(freq.detail.as_deref(), Some("argument = 440"));
+}
