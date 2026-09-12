@@ -6,3 +6,4 @@ oracle/sc_lexer_dump
 editors/vscode/node_modules/
 editors/vscode/out/
 editors/vscode/*.vsix
+editors/vscode/server/

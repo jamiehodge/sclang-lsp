@@ -86,6 +86,8 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
+    "bundle-server": "node scripts/bundle-server.js",
+    "package": "npm run compile && npm run bundle-server && vsce package",
     "watch": "tsc -watch -p ./"
   },
   "dependencies": {
@@ -94,6 +96,7 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.75.0",
+    "@vscode/vsce": "^3.9.2",
     "typescript": "^5.4.0"
   }
 }

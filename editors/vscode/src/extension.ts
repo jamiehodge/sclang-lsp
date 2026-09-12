@@ -85,11 +85,13 @@ interface Resolved {
 }
 
 /**
- * Find the server binary: an explicit setting, then a cargo build in the
- * checkout this extension lives in, then PATH.
+ * Find the server binary, in order: an explicit setting, a copy packaged
+ * inside this extension, a cargo build in the checkout it lives in, then PATH.
  *
- * The middle case is what makes `F5` work with no configuration while
- * developing the server, which is the common case for now.
+ * The packaged copy is what makes an installed extension work, since an
+ * installed one sits in ~/.vscode/extensions and has no repository near it.
+ * The cargo build is what makes `F5` work with nothing configured while
+ * developing the server.
  */
 function resolveServer(context: vscode.ExtensionContext): Resolved {
     const exe = process.platform === 'win32' ? 'sclang-lsp.exe' : 'sclang-lsp';
@@ -103,6 +105,11 @@ function resolveServer(context: vscode.ExtensionContext): Resolved {
         return fs.existsSync(configured)
             ? { command: configured }
             : { problem: `no binary at the configured path: ${configured}` };
+    }
+
+    const bundled = path.join(context.extensionPath, 'server', exe);
+    if (fs.existsSync(bundled)) {
+        return { command: bundled };
     }
 
     // editors/vscode -> repo root
@@ -126,7 +133,7 @@ function resolveServer(context: vscode.ExtensionContext): Resolved {
 
     return {
         problem:
-            'could not find the sclang-lsp binary. Run `cargo build --release` in the repository, ' +
-            'or set sclang-lsp.server.path.',
+            'could not find the sclang-lsp binary. Run `cargo build --release` in the ' +
+            'repository, or set sclang-lsp.server.path.',
     };
 }

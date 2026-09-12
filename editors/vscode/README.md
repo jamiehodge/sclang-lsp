@@ -29,6 +29,27 @@ No configuration is needed while developing: the extension looks for
 `target/release/sclang-lsp` (then `target/debug`) in the checkout it lives in
 before falling back to `PATH`.
 
+## Installing it
+
+To use it in your normal editor rather than a development window:
+
+```bash
+cargo build --release          # from the repository root
+npm install && npm run package # bundles the binary into the VSIX
+code --install-extension sclang-lsp-0.1.0.vsix
+```
+
+`npm run package` copies `target/release/sclang-lsp` into `server/` first. An
+installed extension lives in `~/.vscode/extensions` with no repository near it,
+so without the bundled copy there is nothing for it to find and you would have
+to set `sclang-lsp.server.path` by hand. Bundling makes the VSIX specific to
+the platform it was built on, which is what the per-target release artifacts
+exist for.
+
+> **Disable `vscode-supercollider` first.** Both extensions contribute the
+> `supercollider` language, so with both enabled two servers answer every
+> request and you get duplicate completions and hovers.
+
 ## Settings
 
 | Setting | Effect |
