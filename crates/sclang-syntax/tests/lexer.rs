@@ -147,8 +147,8 @@ fn class_names_are_distinguished_from_identifiers() {
 #[test]
 fn keywords() {
     assert_eq!(
-        kinds("var arg classvar const while true false nil inf pi"),
-        vec![VarKw, ArgKw, ClassvarKw, ConstKw, WhileKw, TrueKw, FalseKw, NilKw, InfKw, PiKw]
+        kinds("var arg classvar const while true false nil pi"),
+        vec![VarKw, ArgKw, ClassvarKw, ConstKw, WhileKw, TrueKw, FalseKw, NilKw, PiKw]
     );
 }
 

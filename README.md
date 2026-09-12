@@ -46,7 +46,8 @@ the resulting server is a standalone binary.
 - [x] Lexer — 35 tests, zero error tokens over the full class library
 - [x] Parser — recursive descent from `lang11d`, with error recovery
 - [x] CST — lossless, round-trips every file in the corpus
-- [x] Differential oracle — validated against sclang's own class library
+- [x] Differential oracles — token-for-token against sclang's own lexer,
+      symbol-for-symbol against its compiled class library
 - [ ] Symbol index
 - [ ] LSP server
 
@@ -88,7 +89,33 @@ cargo run --release --example conformance -- \
 Note that lexing is a substantially lower bar than parsing; a clean sweep here
 means the token model is faithful, not that the language is fully handled.
 
-## Differential oracle
+## Differential oracles
+
+Two, because they check different layers.
+
+### Lexer: against `sc_lexer`
+
+Upstream extracted their lexer into `langutils/sc_lexer`, a standalone library
+with a token dumper. We do **not** link it — this crate stays pure Rust so it
+cross-compiles without a C++ toolchain, and because their C++ API is newer and
+moves faster than the language does. Instead we build it and diff token streams,
+which buys fidelity without the build dependency.
+
+```bash
+./oracle/build-sc-lexer.sh
+cargo run --release --example lexer_oracle -- oracle/sc_lexer_dump <dir>...
+```
+
+```
+files compared : 680
+agreed exactly : 680 / 680 (100.00%)
+```
+
+Token for token, including trivia. The two taxonomies are reconciled on one
+axis only: upstream splits whitespace by character class (`Space`/`NewLine`/
+`Tab`) where we emit one token per run, so runs are coalesced before comparing.
+
+### Symbols: against the compiled class library
 
 Parse rates say a tree was produced, not that it is *correct*. To check
 correctness, `oracle/` asks a running sclang what classes and methods it

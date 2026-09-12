@@ -1,2 +1,5 @@
 target/
 oracle/oracle-symbols.tsv
+oracle/sc_lexer/include/
+oracle/sc_lexer/src/
+oracle/sc_lexer_dump

@@ -61,8 +61,6 @@ pub enum SyntaxKind {
     TrueKw,
     FalseKw,
     NilKw,
-    /// `inf`, which sclang returns as a float literal.
-    InfKw,
     /// `pi`, the `PIE` token.
     PiKw,
     // Note: `lang11d` declares a `PSEUDOVAR` token and has a `pseudovar`
@@ -274,7 +272,6 @@ impl SyntaxKind {
                 | Self::TrueKw
                 | Self::FalseKw
                 | Self::NilKw
-                | Self::InfKw
                 | Self::PiKw
         )
     }

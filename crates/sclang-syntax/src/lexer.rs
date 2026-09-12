@@ -280,7 +280,9 @@ impl<'a> Lexer<'a> {
             "true" => SyntaxKind::TrueKw,
             "false" => SyntaxKind::FalseKw,
             "nil" => SyntaxKind::NilKw,
-            "inf" => SyntaxKind::InfKw,
+            // `inf` is a float literal, not a keyword: old
+            // `processident` returns SC_FLOAT and sc_lexer agrees.
+            "inf" => SyntaxKind::Float,
             "pi" => SyntaxKind::PiKw,
             _ => {
                 if text.starts_with(|c: char| c.is_ascii_uppercase()) {
@@ -363,46 +365,23 @@ impl<'a> Lexer<'a> {
 
     /// `"..."` with backslash escapes. Unterminated runs to end of input.
     ///
-    /// Adjacent string literals concatenate, C-style: after the closing quote
-    /// sclang skips whitespace and, if another `"` follows, keeps accumulating
-    /// into the same token (`PyrLexer.cpp:844-851`). So
-    ///
-    /// ```text
-    /// Error("first part "
-    ///       "second part")
-    /// ```
-    ///
-    /// is a single string. This happens in the lexer, not the grammar —
-    /// `lang11d` has only `string : STRING`.
+    /// One token per quoted segment. Adjacent string literals concatenate in
+    /// SuperCollider, but that join is *not* done here: upstream's `sc_lexer`
+    /// emits a `StringLine` per segment and leaves merging to its consumer
+    /// (PyrLexer.cpp does it for bison, with the comment "this should move
+    /// into the compiler making this unnecessary"). Keeping segments separate
+    /// is what a lossless tree wants, so the parser joins them instead.
     fn string(&mut self) -> SyntaxKind {
-        loop {
-            let mut terminated = false;
-            while let Some(c) = self.bump() {
-                match c {
-                    '\\' => {
-                        self.bump();
-                    }
-                    '"' => {
-                        terminated = true;
-                        break;
-                    }
-                    _ => {}
+        while let Some(c) = self.bump() {
+            match c {
+                '\\' => {
+                    self.bump();
                 }
+                '"' => return SyntaxKind::String,
+                _ => {}
             }
-            if !terminated {
-                return SyntaxKind::Error;
-            }
-            // Look past whitespace for another quote. If there isn't one, the
-            // whitespace must stay outside this token.
-            let resume = self.pos;
-            self.eat_while(is_space);
-            if self.peek() == Some('"') {
-                self.bump();
-                continue;
-            }
-            self.pos = resume;
-            return SyntaxKind::String;
         }
+        SyntaxKind::Error
     }
 
     /// `'foo'`, the quoted symbol form.

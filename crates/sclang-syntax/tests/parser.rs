@@ -482,6 +482,7 @@ fn adjacent_string_literals_concatenate() {
     let src = "x = Error(\"first part \"\n    \"second part\").throw;";
     let parse = parse(src);
     assert!(parse.is_ok(), "errors: {:?}", parse.errors);
-    // Both literals are one token, so one Literal node.
+    // The lexer emits one token per segment (matching sc_lexer's StringLine);
+    // the parser joins them into a single Literal node.
     assert_eq!(count(src, SyntaxKind::Literal), 1);
 }

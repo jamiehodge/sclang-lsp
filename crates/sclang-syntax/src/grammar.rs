@@ -32,7 +32,6 @@ const EXPR_START: &[SyntaxKind] = &[
     TrueKw,
     FalseKw,
     NilKw,
-    InfKw,
     PiKw,
     CurryArg,
     PrimitiveName,
@@ -303,7 +302,6 @@ fn at_bare_default(p: &Parser) -> bool {
             | TrueKw
             | FalseKw
             | NilKw
-            | InfKw
             | PiKw
             | Hash
     )
@@ -714,9 +712,19 @@ fn primary_expr(p: &mut Parser) -> Option<CompletedMarker> {
     let kind = p.current();
     let done = match kind {
         Integer | Float | RadixInteger | HexInteger | Accidental | String | Symbol | Char
-        | TrueKw | FalseKw | NilKw | InfKw | PiKw => {
+        | TrueKw | FalseKw | NilKw | PiKw => {
             let m = p.start();
             p.bump();
+            // Adjacent string literals concatenate; the lexer emits one token
+            // per segment, so the join happens here.
+            if kind == String {
+                while p.at(String) {
+                    if !p.progressing() {
+                        break;
+                    }
+                    p.bump();
+                }
+            }
             // `floatp : floatr pie | integer pie | pie` — `0.5pi` and `2pi`
             // are single literals, lexed as two tokens.
             if matches!(kind, Integer | Float | RadixInteger | HexInteger) {
