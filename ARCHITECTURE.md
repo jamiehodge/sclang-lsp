@@ -8,7 +8,7 @@ the code does not show them.
 ```
 editor  <--stdio/LSP-->  sclang-lsp
       \
-       \--OSC/other-->  sclang   (the editor's business, not the server's)
+       \--stdio-------->  sclang   (the editor's child, not the server's)
 ```
 
 The server owns the conversation with the editor and the truth about document
@@ -28,8 +28,9 @@ Zed have never been supported — the issue has been open since 2024, and the
 plan of record was to add stdio support to sclang itself.
 
 None of that is needed. When the server is a separate process it owns stdio
-with the editor, and an editor that also wants a live sclang talks to it
-separately, on whatever channel it likes. No change to SuperCollider required.
+with the editor, and an editor that also wants a live sclang holds that one
+separately — on its own pipe, where sclang writing to stdout is ordinary output
+rather than a corrupted protocol stream. No change to SuperCollider required.
 
 ## One tier
 
@@ -64,15 +65,13 @@ exist.
    found, arity mismatch. Keep these narrow: fire only when the receiver is a
    literal class name. SuperCollider is dynamically typed and false positives
    here are worse than silence.
-
-Class-library compile errors — which sclang prints as `in <file> line <n> char
-<m>` and which nothing can capture today — used to be listed here as a third
-source, to be read from a supervised sclang's stdout. They still cannot be
-captured by anything, and they are still the most requested missing feature.
-But owning the child process is all it takes, and it does not have to be *this*
-process: an editor extension that spawns sclang can parse those lines and
-publish them itself. In VS Code that is `createDiagnosticCollection`, with no
-language server involved.
+3. **Class-library compile errors** — not from this server at all. sclang
+   prints them while compiling, before any image exists, which is why nothing
+   that talks to a *running* sclang can report them: there is no sclang running
+   yet to ask. Owning the child process is all it takes, and it does not have
+   to be *this* process. The VS Code extension holds sclang's stdout and
+   publishes them through `createDiagnosticCollection`, with no language server
+   involved.
 
 ## Documents
 
@@ -100,9 +99,28 @@ spawns sclang itself and keeps it entirely separate from this server. In
 Neovim and Emacs, scnvim and scel already do exactly that, and offer no
 language intelligence — the two halves fit together without overlapping.
 
+`editors/vscode` is the worked example. It owns an sclang, writes to its stdin
+and reads its stdout, and the server is not in that path. What crosses between
+the halves is one request in the other direction: *what region is the cursor
+in*, which is a question about syntax rather than about execution, and is
+answered by the standard `textDocument/selectionRange`. Counting parentheses in
+the extension would be the alternative, and it is wrong on `"("`, `$(`, `'('`
+and `// (`.
+
 This also removes a whole category of failure that the two-tier design had to
-legislate against: nothing can block on a live image, because nothing talks to
+legislate against: nothing in the server can block on a live image, because
+nothing in it talks to one.
+
+### Talking to a sclang someone else started
+
+Considered and rejected. `NetAddr.langPort` means a running sclang is listening
+on UDP, but nothing in the class library interprets what arrives there, so it
+would take sclang-side code in a quark or a `startup.scd` — the dependency this
+design exists to avoid. And it buys only evaluation: without the pipe there is
+no post window and no compile errors, the two things that come free with the
+child. Owning the process is the cheaper half of that trade, not the expensive
 one.
+
 
 ## sclang at development time
 

@@ -51,16 +51,20 @@ This is language intelligence, not a SuperCollider environment. It reads and
 understands code: diagnostics, completion, signature help, inlay hints, hover,
 goto-definition, references, rename, symbols.
 
-**It does not run anything.** No evaluation, no post window, no server control,
-no `~envir` introspection — all of which need a live sclang, and none of which
-are the language server's job. The server never spawns sclang and never talks
-to one.
+**The server never runs anything.** It does not spawn sclang, contact one, or
+need one to exist — which is what lets it answer on a class library that does
+not compile, and on a machine with no SuperCollider installed at all.
 
-In Neovim and Emacs that makes it the missing half: `scnvim` and `scel` already
-manage an sclang and provide no language intelligence, so the two sit side by
-side without overlapping. Anything else that already contributes the
-`supercollider` language will collide with it, since two clients claiming a
-language means two servers answering every request.
+Running code is the editor's job. The VS Code extension in
+[`editors/vscode`](editors/vscode) does it in a child process of its own:
+evaluation, a post window, and the class-library compile errors that only
+something holding sclang's output can report. The server is not in that path
+and never learns that sclang exists. In Neovim and Emacs the same role is
+already filled by `scnvim` and `scel`.
+
+Anything else that already contributes the `supercollider` language will
+collide with this, since two clients claiming a language means two servers
+answering every request.
 
 ## Status
 
@@ -71,7 +75,9 @@ language means two servers answering every request.
       symbol-for-symbol against its compiled class library
 - [x] Symbol index — classes, methods, args, accessors, docs
 - [x] LSP server — diagnostics, completion, signature help, inlay hints,
-      hover, goto-definition, references, rename, symbols
+      hover, goto-definition, references, rename, symbols, selection ranges
+- [x] VS Code extension — the client, plus an sclang for evaluation, a post
+      window and class-library compile errors
 
 ## The server
 
@@ -91,6 +97,7 @@ spawns sclang, contacts one, or needs one to exist.
 | `rename` | Function locals and class names only — see below |
 | `documentSymbol` | Classes with their methods nested |
 | `workspaceSymbol` | Classes and methods across the index |
+| `selectionRange` | The chain of syntactic regions around a position — expand-selection, and the only sound way to find the block an editor should evaluate |
 
 Document sync is incremental, and the buffer always wins over the file on
 disk — a class that exists only in an unsaved edit is immediately visible to
@@ -139,10 +146,13 @@ Get a binary from the [releases page](../../releases) or build one with
 ignores arguments it does not recognise.
 
 **VS Code.** An extension lives in [`editors/vscode`](editors/vscode). It finds
-the binary, starts it, and gets out of the way — no configuration needed while
-developing, since it looks for a `cargo build` result in the checkout it ships
-in. See its [README](editors/vscode/README.md) for the `F5` loop and for
-packaging a VSIX with the server bundled inside.
+the binary and starts it — no configuration needed while developing, since it
+looks for a `cargo build` result in the checkout it ships in. It also owns an
+sclang of its own, for the half of the job the server refuses: `⌘⏎` evaluates
+the selection, the enclosing block or the current line, output goes to a post
+window, and compile errors land in the Problems panel. See its
+[README](editors/vscode/README.md) for the `F5` loop and for packaging a VSIX
+with the server bundled inside.
 
 **Neovim** (0.11 or newer, using the built-in client):
 
@@ -214,8 +224,8 @@ that were not meant. It refuses instance variables and classvars too: `var
 both. Find-references has no such restriction, because a wrong row in a list
 costs a glance rather than a working program.
 `~envir` contents cannot be enumerated without a running image and are the one
-real capability given up by never contacting one. No SCDoc rendering, no
-evaluation — see "Deliberately not done" in ARCHITECTURE.md.
+real capability given up by never contacting one. No SCDoc rendering either —
+see "Deliberately not done" in ARCHITECTURE.md.
 
 ### The test that keeps the layering honest
 
