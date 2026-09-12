@@ -34,7 +34,7 @@ fn read_dump(text: &str) -> BTreeMap<String, Methods> {
     let mut files: BTreeMap<String, Methods> = BTreeMap::new();
     let mut file: Option<String> = None;
     let mut class = String::new();
-    let mut method: Option<(String, i32)> = None;
+    let mut method: Option<(String, i32, bool)> = None;
 
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("***PARSE-DUMP-BEGIN ") {
@@ -71,11 +71,20 @@ fn read_dump(text: &str) -> BTreeMap<String, Methods> {
             "MethodNode" => {
                 // The name is followed by an optional primitive name.
                 let name = name.split('\'').next().unwrap_or(&name).trim().to_string();
-                method = Some((name, level));
+                let key = format!("{class}.{name}");
+                // compileClass runs once per class, but dumpNodeList follows
+                // mNext — so each call re-dumps the rest of the chain and a
+                // file's later classes appear in several sections. Keep the
+                // first sighting of each method and ignore the repeats.
+                let already = files.get(f).is_some_and(|m| m.contains_key(&key));
+                method = Some((name, level, already));
+                if !already {
+                    files.entry(f.clone()).or_default().entry(key).or_default();
+                }
             }
             "Call" | "BinopCall" => {
-                if let Some((m, mlevel)) = &method {
-                    if level > *mlevel {
+                if let Some((m, mlevel, skip)) = &method {
+                    if !skip && level > *mlevel {
                         let key = format!("{class}.{m}");
                         files
                             .entry(f.clone())
@@ -187,10 +196,16 @@ fn selectors(node: &SyntaxNode, source: &str, out: &mut Vec<String>) {
             out.push("envirGet".to_string());
             return;
         }
-        // `arr[3]` is `at`; a subrange `arr[1..3]` is `copySeries`.
+        // `arr[3]` is `at`; a subrange `arr[1..3]` is `copySeries`. But
+        // `Set[1, 2]` is a typed collection *literal*, not an index, and
+        // builds a DynList with no call of its own.
         SyntaxKind::IndexExpr | SyntaxKind::DotIndexExpr => {
-            let subrange = node.child_nodes().any(|n| n.kind == SyntaxKind::IndexRange);
-            out.push(if subrange { "copySeries" } else { "at" }.to_string());
+            let typed_literal = matches!(node.children.first(), Some(Child::Node(n))
+                if n.kind == SyntaxKind::ClassRef);
+            if !typed_literal {
+                let subrange = node.child_nodes().any(|n| n.kind == SyntaxKind::IndexRange);
+                out.push(if subrange { "copySeries" } else { "at" }.to_string());
+            }
             descend(node, source, out);
             return;
         }
@@ -206,9 +221,12 @@ fn selectors(node: &SyntaxNode, source: &str, out: &mut Vec<String>) {
             if let Some(Child::Node(target)) = node.children.first() {
                 match target.kind {
                     // `arr[3] = 9` is `put`, replacing the `at` the index
-                    // would otherwise contribute.
+                    // would otherwise contribute; a subrange is `putSeries`.
                     SyntaxKind::IndexExpr | SyntaxKind::DotIndexExpr => {
-                        out.push("put".to_string());
+                        let subrange = target
+                            .child_nodes()
+                            .any(|n| n.kind == SyntaxKind::IndexRange);
+                        out.push(if subrange { "putSeries" } else { "put" }.to_string());
                         for c in &target.children {
                             if let Child::Node(n) = c {
                                 selectors(n, source, out);
@@ -323,13 +341,16 @@ fn ours(source: &str) -> Methods {
             let Some(name) = name_of(m, source, is_class) else {
                 continue;
             };
+            // The dump marks class methods with `*`; a class and instance
+            // method of the same name are otherwise indistinguishable.
+            let name = if is_class { format!("*{name}") } else { name };
             let mut sels = Vec::new();
-            // Only the body: argument defaults are dumped separately.
+            // sclang dumps mArglist, then mVarlist, then mBody — and argument
+            // defaults can contain calls, so the argument list belongs in the
+            // comparison rather than being skipped.
             for c in &m.children {
                 if let Child::Node(n) = c {
-                    if n.kind != SyntaxKind::ArgDecls {
-                        selectors(n, source, &mut sels);
-                    }
+                    selectors(n, source, &mut sels);
                 }
             }
             out.insert(format!("{class}.{name}"), sels);
@@ -398,7 +419,11 @@ fn main() {
             let t = their_sels.get(at).map(String::as_str).unwrap_or("<end>");
             let m = my_sels.get(at).map(String::as_str).unwrap_or("<end>");
             *diffs.entry(format!("sclang={t} ours={m}")).or_default() += 1;
-            if samples.len() < 15 {
+            let want = std::env::args().nth(2);
+            let show = want.as_deref().map_or(true, |w| {
+                key.contains(w) || format!("sclang={t} ours={m}").contains(w)
+            });
+            if show && samples.len() < 15 {
                 samples.push(format!(
                     "{key}\n      sclang: {:?}\n      ours  : {:?}",
                     &their_sels[..their_sels.len().min(at + 4)],

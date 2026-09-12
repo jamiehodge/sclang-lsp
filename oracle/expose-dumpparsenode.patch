@@ -1,18 +1,32 @@
 diff --git a/lang/LangSource/DumpParseNode.cpp b/lang/LangSource/DumpParseNode.cpp
-index b62761f..0f51fe2 100644
+index b62761f..2e63b4f 100644
 --- a/lang/LangSource/DumpParseNode.cpp
 +++ b/lang/LangSource/DumpParseNode.cpp
-@@ -81,6 +81,9 @@ void PyrMethodNode::dump(int level) {
-     postfl("%2d MethodNode '%s'  %s\n", level, slotRawSymbol(&mMethodName->mSlot)->name,
+@@ -78,9 +78,22 @@ void PyrClassNode::dump(int level) {
+ }
+ 
+ void PyrMethodNode::dump(int level) {
+-    postfl("%2d MethodNode '%s'  %s\n", level, slotRawSymbol(&mMethodName->mSlot)->name,
++    // Mark class methods with a leading `*`, as the source does. Without it a
++    // class and instance method of the same name are indistinguishable, which
++    // they routinely are — Environment has both `*make` and `make`.
++    postfl("%2d MethodNode '%s%s'  %s\n", level, mIsClassMethod ? "*" : "",
++           slotRawSymbol(&mMethodName->mSlot)->name,
             mPrimitiveName ? slotRawSymbol(&mPrimitiveName->mSlot)->name : "");
      DUMPNODE(mArglist, level + 1);
 +    // Variable declarations were omitted here, so a method's `var x = ...`
 +    // initialisers never appeared in the dump.
-+    DUMPNODE(mVarlist, level + 1);
++    //
++    // Dump the VarDef chain directly rather than the PyrVarListNode. The chain
++    // already spans every `var` statement in the method, while each VarList
++    // after the first points partway along it — so dumping the list chain
++    // repeats the tail of the declarations.
++    if (mVarlist)
++        DUMPNODE(mVarlist->mVarDefs, level + 1);
      DUMPNODE(mBody, level + 1);
      DUMPNODE(mNext, level);
  }
-@@ -132,7 +135,10 @@ void PyrSlotNode::dumpPushLit(int level) {
+@@ -132,7 +145,10 @@ void PyrSlotNode::dumpPushLit(int level) {
      if (!IsPtr(&mSlot))
          dumpPyrSlot(&mSlot);
      else {
@@ -24,7 +38,7 @@ index b62761f..0f51fe2 100644
      }
  }
  
-@@ -141,7 +147,10 @@ void PyrSlotNode::dumpLiteral(int level) {
+@@ -141,7 +157,10 @@ void PyrSlotNode::dumpLiteral(int level) {
      if (!IsPtr(&mSlot))
          dumpPyrSlot(&mSlot);
      else {
@@ -36,13 +50,19 @@ index b62761f..0f51fe2 100644
      }
  }
  
-@@ -208,6 +217,9 @@ void PyrLitListNode::dump(int level) {
+@@ -208,6 +227,15 @@ void PyrLitListNode::dump(int level) {
  void PyrBlockNode::dump(int level) {
      postfl("%2d Func\n", level);
      DUMPNODE(mArglist, level + 1);
 +    // Variable declarations were omitted here, so a method's `var x = ...`
 +    // initialisers never appeared in the dump.
-+    DUMPNODE(mVarlist, level + 1);
++    //
++    // Dump the VarDef chain directly rather than the PyrVarListNode. The chain
++    // already spans every `var` statement in the method, while each VarList
++    // after the first points partway along it — so dumping the list chain
++    // repeats the tail of the declarations.
++    if (mVarlist)
++        DUMPNODE(mVarlist->mVarDefs, level + 1);
      DUMPNODE(mBody, level + 1);
      DUMPNODE(mNext, level);
  }
