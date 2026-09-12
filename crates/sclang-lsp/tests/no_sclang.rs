@@ -146,8 +146,16 @@ impl Drop for StdioClient {
     }
 }
 
-fn fixture() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("sclang-lsp-no-sclang-{}", std::process::id()));
+/// A class library of its own for each test.
+///
+/// Naming this by pid alone is not enough: cargo runs the tests in one process
+/// on separate threads, so a shared directory means one test's cleanup deletes
+/// the library another is still serving from.
+fn fixture(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "sclang-lsp-no-sclang-{name}-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("Object.sc"), "Object {\n\tpostln { ^this }\n}\n").unwrap();
@@ -166,7 +174,7 @@ fn fixture() -> PathBuf {
 
 #[test]
 fn completion_and_goto_work_with_no_sclang_on_the_path() {
-    let dir = fixture();
+    let dir = fixture("completion");
     let mut client = StdioClient::start(&dir);
 
     let uri = lsp_types::Url::from_file_path(dir.join("Test.scd")).unwrap();
@@ -217,7 +225,7 @@ fn completion_and_goto_work_with_no_sclang_on_the_path() {
 
 #[test]
 fn diagnostics_arrive_over_stdio() {
-    let dir = fixture();
+    let dir = fixture("diagnostics");
     let mut client = StdioClient::start(&dir);
 
     let uri = lsp_types::Url::from_file_path(dir.join("Broken.scd")).unwrap();
