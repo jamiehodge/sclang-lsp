@@ -41,6 +41,10 @@ from that, and each is marked at the site in the source:
 No runtime dependency on sclang. The derivation happens at development time;
 the resulting server is a standalone binary.
 
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime design: the process
+topology, why the server owns stdio, the two-tier knowledge model and the rule
+that keeps it honest.
+
 ## Status
 
 - [x] Lexer — 35 tests, zero error tokens over the full class library
