@@ -46,6 +46,7 @@ the resulting server is a standalone binary.
 - [x] Lexer — 35 tests, zero error tokens over the full class library
 - [x] Parser — recursive descent from `lang11d`, with error recovery
 - [x] CST — lossless, round-trips every file in the corpus
+- [x] Differential oracle — validated against sclang's own class library
 - [ ] Symbol index
 - [ ] LSP server
 
@@ -86,6 +87,41 @@ cargo run --release --example conformance -- \
 
 Note that lexing is a substantially lower bar than parsing; a clean sweep here
 means the token model is faithful, not that the language is fully handled.
+
+## Differential oracle
+
+Parse rates say a tree was produced, not that it is *correct*. To check
+correctness, `oracle/` asks a running sclang what classes and methods it
+actually compiled — names, class/instance, argument names, source positions —
+and diffs that against what this crate extracts from the same files.
+
+```bash
+./oracle/run.sh
+```
+
+```
+classes  oracle  1764   ours  1757      (7 missing, 0 extra, 0 superclass mismatches)
+methods  oracle 14490   ours 14484      (6 missing, 0 extra)
+argument-name mismatches: 0
+
+methods matching sclang exactly (name and arguments): 14484 / 14490 (99.96%)
+```
+
+All 13 remaining differences come from two files that are not valid UTF-8 —
+Latin-1 sources from the 2000s that this crate currently refuses to read. That
+is the only known correctness gap.
+
+The class library is open-ended: anyone can add classes via Extensions or
+quarks. So there is no fixed set to check against and no useful fixture to
+commit — the differ takes its file list from the live sclang dump, which means
+it automatically covers whatever is installed on the machine it runs on. Re-run
+it after installing a quark or upgrading SuperCollider.
+
+A note on what this does *not* validate: it checks the symbol layer, which is
+what an index needs. It does not compare expression structure. `DumpParseNode.cpp`
+would give a full parse tree, but nothing in sclang ever calls `dump()` — no
+flag, no primitive, no caller — so reaching it would mean patching and
+rebuilding SuperCollider.
 
 ## Tests
 
