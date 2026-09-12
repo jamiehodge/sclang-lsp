@@ -10,6 +10,7 @@
 
 use crate::analysis::ancestors_at;
 use sclang_syntax::{SyntaxKind, SyntaxNode};
+use std::ops::Range;
 
 /// Where a visible name came from. Shapes how it is offered and ranked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,12 +39,17 @@ impl LocalKind {
     }
 }
 
-/// A name in scope, with where it came from and its default if it has one.
+/// A name in scope: where it came from, its default, and where it was written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Local {
     pub name: String,
     pub kind: LocalKind,
     pub default: Option<String>,
+    /// The whole declaration, e.g. `freq = 440`.
+    pub range: Range<u32>,
+    /// Just the name. What goto-definition selects, and what a rename would
+    /// rewrite — the same split `sclang_index::Location` makes.
+    pub name_range: Range<u32>,
 }
 
 /// The pseudo-variables sclang resolves during compilation.
@@ -90,6 +96,10 @@ pub fn locals_at(root: &SyntaxNode, source: &str, offset: u32) -> Vec<Local> {
                 name: (*name).to_string(),
                 kind: LocalKind::Variable,
                 default: None,
+                // Bound by the compiler, not written down anywhere, so there
+                // is nowhere for goto-definition to go.
+                range: 0..0,
+                name_range: 0..0,
             },
         );
     }
@@ -117,6 +127,8 @@ fn collect_declarations(node: &SyntaxNode, source: &str, out: &mut Vec<Local>) {
                         name: name.text(source).to_string(),
                         kind,
                         default: default_of(def, source),
+                        range: def.start..def.end,
+                        name_range: name.start..name.end,
                     },
                 );
             }
@@ -149,6 +161,8 @@ fn collect_class_slots(node: &SyntaxNode, source: &str, out: &mut Vec<Local>) {
                         name: name.text(source).to_string(),
                         kind,
                         default: default_of(slot, source),
+                        range: slot.start..slot.end,
+                        name_range: name.start..name.end,
                     },
                 );
             }

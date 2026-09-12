@@ -5,7 +5,7 @@
 //! not, this returns every class that defines the selector rather than
 //! guessing — see "Deliberately not done" in ARCHITECTURE.md.
 
-use crate::analysis::{token_at, Bias, Receiver};
+use crate::analysis::{call_at, resolve_selector, token_at, Bias, Receiver};
 use crate::documents::Document;
 use crate::scope::{locals_at, Local, LocalKind};
 use sclang_index::{Method, MethodKind, SymbolIndex};
@@ -142,6 +142,7 @@ pub fn completion(doc: &Document, index: &SymbolIndex, offset: u32) -> Completio
             }
         },
         Context::Bare { prefix } => {
+            push_keyword_args(doc, index, offset, &prefix, &mut items);
             // Names the user wrote themselves come first. Before this, typing
             // `fr` inside a method that declares `freq` offered sixty global
             // selectors and not the one name actually in scope.
@@ -155,10 +156,17 @@ pub fn completion(doc: &Document, index: &SymbolIndex, offset: u32) -> Completio
             // Rank the two groups rather than letting the client interleave
             // them alphabetically, which would bury a local among globals.
             for (i, item) in items.iter_mut().enumerate() {
-                item.sort_text = Some(format!("{}{}", if i < before { 0 } else { 1 }, item.label));
+                if item.sort_text.is_some() {
+                    continue; // a keyword argument, already ranked
+                }
+                item.sort_text = Some(format!("{}{}", if i < before { 1 } else { 2 }, item.label));
             }
         }
-        Context::Nothing => {}
+        // Directly after `(`, with nothing typed. Not a token the classifier
+        // has anything to say about, but the call around it does.
+        Context::Nothing => {
+            push_keyword_args(doc, index, offset, "", &mut items);
+        }
     }
 
     CompletionResponse::List(CompletionList {
@@ -195,6 +203,49 @@ fn push_selectors_by_name(
         items.push(item);
     }
     false
+}
+
+/// Offer `name:` for each parameter of the call the cursor is inside.
+///
+/// Only when the receiver resolves exactly. With an unknown receiver the
+/// selector may be defined on dozens of classes with different parameter
+/// names, and inventing one set would be a guess dressed as knowledge.
+fn push_keyword_args(
+    doc: &Document,
+    index: &SymbolIndex,
+    offset: u32,
+    prefix: &str,
+    items: &mut Vec<CompletionItem>,
+) {
+    let Some(call) = call_at(&doc.parse().root, &doc.text, offset) else {
+        return;
+    };
+    if !matches!(call.receiver, Receiver::Class(_)) {
+        return;
+    }
+    let methods = resolve_selector(index, &call.selector, &call.receiver);
+    let Some(method) = methods.first() else {
+        return;
+    };
+
+    for arg in &method.args {
+        // A `...rest` parameter cannot be passed by name.
+        if arg.is_rest || !arg.name.starts_with(prefix) {
+            continue;
+        }
+        items.push(CompletionItem {
+            label: format!("{}:", arg.name),
+            kind: Some(CompletionItemKind::PROPERTY),
+            detail: Some(match &arg.default {
+                Some(default) => format!("{} — default {}", method.signature(), default),
+                None => method.signature(),
+            }),
+            // Sorts above both locals and selectors: inside a call, naming a
+            // parameter is usually what was meant.
+            sort_text: Some(format!("0{}", arg.name)),
+            ..Default::default()
+        });
+    }
 }
 
 fn local_item(local: &Local) -> CompletionItem {

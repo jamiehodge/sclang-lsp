@@ -6,10 +6,10 @@
 //! belong to many classes, and the protocol's list of signatures is the honest
 //! shape for saying so.
 
-use crate::analysis::{ancestors_at, resolve_selector, skip_trivia_back, Receiver};
+use crate::analysis::{call_at, resolve_selector};
 use crate::documents::Document;
 use sclang_index::{Method, SymbolIndex};
-use sclang_syntax::{Child, SyntaxKind, SyntaxNode};
+use sclang_syntax::{SyntaxKind, SyntaxNode};
 
 use lsp_types::{
     Documentation, MarkupContent, MarkupKind, ParameterInformation, ParameterLabel, SignatureHelp,
@@ -22,23 +22,15 @@ const MAX_SIGNATURES: usize = 8;
 pub fn signature_help(doc: &Document, index: &SymbolIndex, offset: u32) -> Option<SignatureHelp> {
     let root = &doc.parse().root;
     let source = &doc.text;
-    // A cursor sitting in the space after a comma is still inside the call.
-    let offset = skip_trivia_back(root, offset);
-    let path = ancestors_at(root, offset);
+    let call = call_at(root, source, offset)?;
 
-    // The innermost argument list wins, so a nested call inside an argument
-    // describes itself rather than its enclosing call.
-    let position = path.iter().rposition(|n| n.kind == SyntaxKind::ArgList)?;
-    let arg_list = path[position];
-    let call = path.get(position.checked_sub(1)?)?;
-
-    let (name, receiver) = callee(call, arg_list, source)?;
-    let methods = resolve_selector(index, &name, &receiver);
+    let methods = resolve_selector(index, &call.selector, &call.receiver);
     if methods.is_empty() {
         return None;
     }
+    let arg_list = call.arg_list;
 
-    let active = active_parameter(arg_list, source, offset, methods[0]);
+    let active = active_parameter(arg_list, source, call.offset, methods[0]);
 
     let signatures: Vec<_> = methods
         .iter()
@@ -51,58 +43,6 @@ pub fn signature_help(doc: &Document, index: &SymbolIndex, offset: u32) -> Optio
         active_signature: Some(0),
         active_parameter: Some(active),
     })
-}
-
-/// The selector being called and what it is being sent to.
-fn callee(call: &SyntaxNode, arg_list: &SyntaxNode, source: &str) -> Option<(String, Receiver)> {
-    match call.kind {
-        // `receiver.selector(...)`
-        SyntaxKind::MethodCall => {
-            let dot = call
-                .child_tokens()
-                .filter(|t| t.kind == SyntaxKind::Dot && t.end <= arg_list.start)
-                .last()?;
-            let selector = call
-                .child_tokens()
-                .find(|t| t.kind == SyntaxKind::Ident && t.start >= dot.end)?;
-            let receiver = call
-                .children
-                .iter()
-                .rev()
-                .find(|c| c.range().1 <= dot.start);
-            let receiver = match receiver {
-                Some(Child::Node(n)) if n.kind == SyntaxKind::ClassRef => n
-                    .token_of(SyntaxKind::ClassName)
-                    .map(|t| Receiver::Class(t.text(source).to_string()))
-                    .unwrap_or(Receiver::Unknown),
-                _ => Receiver::Unknown,
-            };
-            Some((selector.text(source).to_string(), receiver))
-        }
-
-        SyntaxKind::CallExpr => {
-            let head = call.child_nodes().next()?;
-            match head.kind {
-                // `Point(1, 2)` is `Point.new(1, 2)`.
-                SyntaxKind::ClassRef => {
-                    let class = head.token_of(SyntaxKind::ClassName)?;
-                    Some((
-                        "new".to_string(),
-                        Receiver::Class(class.text(source).to_string()),
-                    ))
-                }
-                // `foo(a, b)` is `a.foo(b)` — the receiver is the first
-                // argument, whose type is unknown, so every implementor of
-                // `foo` is a candidate.
-                SyntaxKind::NameRef => {
-                    let name = head.token_of(SyntaxKind::Ident)?;
-                    Some((name.text(source).to_string(), Receiver::Unknown))
-                }
-                _ => None,
-            }
-        }
-        _ => None,
-    }
 }
 
 /// Which parameter the cursor sits on.

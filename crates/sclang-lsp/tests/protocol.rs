@@ -317,3 +317,130 @@ fn completion_offers_names_declared_in_the_enclosing_method() {
     let freq = list.items.iter().find(|i| i.label == "freq").unwrap();
     assert_eq!(freq.detail.as_deref(), Some("argument = 440"));
 }
+
+#[test]
+fn goto_definition_on_a_local_variable() {
+    let mut h = Harness::start("goto-local", &mini_library());
+    let uri = h.open("Test.scd", "{\n\tvar foo = 1;\n\n\tfoo.postln;\n}\n");
+    let _ = h.await_diagnostics(&uri);
+
+    // Line 3 is `\tfoo.postln;` — the cursor sits on the use of `foo`.
+    let response: GotoDefinitionResponse = h.request_at("textDocument/definition", &uri, 3, 2);
+    let GotoDefinitionResponse::Scalar(location) = response else {
+        panic!("expected exactly one definition");
+    };
+    // Line 1 is `\tvar foo = 1;`, and `foo` starts at character 5.
+    assert_eq!(location.uri, uri);
+    assert_eq!(location.range.start, Position::new(1, 5));
+    assert_eq!(location.range.end, Position::new(1, 8));
+}
+
+#[test]
+fn goto_definition_on_an_argument_from_inside_the_body() {
+    let mut h = Harness::start("goto-arg", &mini_library());
+    let uri = h.open(
+        "Mine.sc",
+        "Mine : Object {\n\trun { |freq = 440|\n\t\t^freq\n\t}\n}\n",
+    );
+    let _ = h.await_diagnostics(&uri);
+
+    let response: GotoDefinitionResponse = h.request_at("textDocument/definition", &uri, 2, 4);
+    let GotoDefinitionResponse::Scalar(location) = response else {
+        panic!("expected exactly one definition");
+    };
+    assert_eq!(location.range.start, Position::new(1, 8));
+}
+
+#[test]
+fn an_inner_declaration_wins_over_an_outer_one() {
+    let mut h = Harness::start("goto-shadow", &mini_library());
+    // Two bindings called `v`; the use must resolve to the inner one.
+    let uri = h.open("Test.scd", "{ |v|\n\t{ |v|\n\t\tv.postln;\n\t};\n}\n");
+    let _ = h.await_diagnostics(&uri);
+
+    let response: GotoDefinitionResponse = h.request_at("textDocument/definition", &uri, 2, 2);
+    let GotoDefinitionResponse::Scalar(location) = response else {
+        panic!("expected exactly one definition");
+    };
+    assert_eq!(
+        location.range.start.line, 1,
+        "should resolve to the inner `v`"
+    );
+}
+
+#[test]
+fn hover_on_a_local_describes_the_binding() {
+    let mut h = Harness::start("hover-local", &mini_library());
+    let uri = h.open("Test.scd", "{\n\tvar foo = 1 + 2;\n\n\tfoo.postln;\n}\n");
+    let _ = h.await_diagnostics(&uri);
+
+    let hover: Hover = h.request_at("textDocument/hover", &uri, 3, 2);
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markup");
+    };
+    assert!(markup.value.contains("var foo = 1 + 2"), "{}", markup.value);
+    assert!(markup.value.contains("variable"), "{}", markup.value);
+}
+
+#[test]
+fn completion_offers_parameter_names_inside_a_call() {
+    let mut h = Harness::start("kwargs", &mini_library());
+    let uri = h.open("Test.scd", "SinOsc.ar(");
+
+    let response: CompletionResponse = h.request_at("textDocument/completion", &uri, 0, 10);
+    let CompletionResponse::List(list) = response else {
+        panic!("expected a list");
+    };
+    let labels: Vec<&str> = list.items.iter().map(|i| i.label.as_str()).collect();
+    assert!(labels.contains(&"freq:"), "{labels:?}");
+    assert!(labels.contains(&"phase:"), "{labels:?}");
+}
+
+#[test]
+fn inlay_hints_name_positional_arguments() {
+    let mut h = Harness::start("inlay", &mini_library());
+    let uri = h.open("Test.scd", "SinOsc.ar(440, 0)\n");
+    let _ = h.await_diagnostics(&uri);
+
+    let hints: Vec<InlayHint> = h.request(
+        "textDocument/inlayHint",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end": { "line": 1, "character": 0 },
+            },
+        }),
+    );
+    let labels: Vec<String> = hints
+        .iter()
+        .map(|h| match &h.label {
+            InlayHintLabel::String(s) => s.clone(),
+            _ => panic!("expected a string label"),
+        })
+        .collect();
+    assert_eq!(labels, vec!["freq:", "phase:"]);
+    assert_eq!(hints[0].position, Position::new(0, 10));
+}
+
+#[test]
+fn no_inlay_hints_when_the_receiver_is_unknown() {
+    let mut h = Harness::start("inlay-unknown", &mini_library());
+    let uri = h.open("Test.scd", "x.ar(440, 0)\n");
+    let _ = h.await_diagnostics(&uri);
+
+    let hints: Vec<InlayHint> = h.request(
+        "textDocument/inlayHint",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end": { "line": 1, "character": 0 },
+            },
+        }),
+    );
+    assert!(
+        hints.is_empty(),
+        "labelling these would be a guess: {hints:?}"
+    );
+}

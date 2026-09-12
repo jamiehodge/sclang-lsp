@@ -8,7 +8,8 @@
 use crate::analysis::{point_at, resolve_selector, Bias, Point};
 use crate::documents::Document;
 use crate::locations::Resolver;
-use lsp_types::GotoDefinitionResponse;
+use crate::scope::locals_at;
+use lsp_types::{GotoDefinitionResponse, Url};
 use sclang_index::SymbolIndex;
 
 /// How many implementors to offer for an unresolvable selector.
@@ -18,6 +19,7 @@ use sclang_index::SymbolIndex;
 const MAX_IMPLEMENTORS: usize = 50;
 
 pub fn goto_definition(
+    uri: &Url,
     doc: &Document,
     index: &SymbolIndex,
     offset: u32,
@@ -36,6 +38,20 @@ pub fn goto_definition(
             .into_iter()
             .take(MAX_IMPLEMENTORS)
             .filter_map(|m| resolver.resolve(&m.location))
+            .collect(),
+
+        // A local never leaves the buffer it is written in, so the whole
+        // answer is in the tree already in hand.
+        Point::Local { name } => locals_at(&doc.parse().root, &doc.text, offset)
+            .into_iter()
+            // Innermost first, so the first match is the binding in force.
+            .find(|l| l.name == name)
+            // A pseudo-variable like `this` is bound by the compiler and
+            // written down nowhere, so it has an empty range and nothing to
+            // jump to.
+            .filter(|l| l.name_range.end > l.name_range.start)
+            .map(|l| resolver.in_document(uri, doc, l.name_range))
+            .into_iter()
             .collect(),
 
         // The cursor is already on the definition. Offering to jump to it is

@@ -53,8 +53,8 @@ that keeps it honest.
 - [x] Differential oracles — token-for-token against sclang's own lexer,
       symbol-for-symbol against its compiled class library
 - [x] Symbol index — classes, methods, args, accessors, docs
-- [x] LSP server — diagnostics, completion, signature help, hover,
-      goto-definition, symbols
+- [x] LSP server — diagnostics, completion, signature help, inlay hints,
+      hover, goto-definition, symbols
 
 ## The server
 
@@ -66,10 +66,11 @@ crate spawns or contacts a running image.
 | Request | Behaviour |
 |---|---|
 | `publishDiagnostics` | Parser errors, per keystroke |
-| `completion` | Names in scope first — arguments, `var`s, instance variables — then class names, class-side methods after `Foo.` with inherited ones included, or every selector when the receiver is unknown |
+| `completion` | Parameter names inside a call, then names in scope — arguments, `var`s, instance variables — then class names, class-side methods after `Foo.` with inherited ones included, or every selector when the receiver is unknown |
 | `signatureHelp` | The signature of the call being typed, with the parameter under the cursor marked. A `name:` argument selects its own parameter rather than its position |
-| `hover` | Signature, superclass chain, and the comment above the definition |
-| `definition` | Exact for a class name or a class receiver; every implementor otherwise |
+| `hover` | Signature, superclass chain, and the comment above the definition; for a local, what kind of binding it is and its default |
+| `definition` | Exact for a class name, a class receiver, or a local binding; every implementor otherwise |
+| `inlayHint` | The parameter each positional argument fills, for calls that resolve exactly |
 | `documentSymbol` | Classes with their methods nested |
 | `workspaceSymbol` | Classes and methods across the index |
 
@@ -120,7 +121,10 @@ result in the checkout it ships in. See its
 
 No type inference, so `x.foo` offers every class defining `foo` rather than
 guessing which `x` is — and signature help lists every implementor's signature
-for the same reason. No references, rename, inlay hints or semantic tokens yet.
+for the same reason. Inlay hints and keyword-argument completion go further and
+stay silent unless the receiver is a literal class name: both render as though
+they were in the source, so a guess there would read as a fact. No references,
+rename or semantic tokens yet.
 `~envir` contents, SCDoc rendering and evaluation are all tier 2 and absent.
 See "Deliberately not done" in ARCHITECTURE.md.
 

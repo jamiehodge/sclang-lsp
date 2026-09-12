@@ -139,15 +139,24 @@ impl Server {
                     features::signature_help::signature_help(doc, &s.index, offset)
                 })
             }
+            request::InlayHintRequest::METHOD => {
+                self.handle::<request::InlayHintRequest>(req, |s, p| {
+                    let doc = s.docs.get(&p.text_document.uri)?;
+                    Some(features::inlay_hints::inlay_hints(
+                        doc, &s.index, p.range, s.enc,
+                    ))
+                })
+            }
             request::HoverRequest::METHOD => self.handle::<request::HoverRequest>(req, |s, p| {
                 let (doc, offset) = s.locate(&p.text_document_position_params)?;
                 features::hover::hover(doc, &s.index, offset, s.enc)
             }),
             request::GotoDefinition::METHOD => {
                 self.handle::<request::GotoDefinition>(req, |s, p| {
+                    let uri = p.text_document_position_params.text_document.uri.clone();
                     let (doc, offset) = s.locate(&p.text_document_position_params)?;
                     let resolver = Resolver::new(&s.docs, s.enc);
-                    features::goto::goto_definition(doc, &s.index, offset, &resolver)
+                    features::goto::goto_definition(&uri, doc, &s.index, offset, &resolver)
                 })
             }
             request::DocumentSymbolRequest::METHOD => self
@@ -415,6 +424,7 @@ pub fn capabilities(enc: PositionEncoding) -> ServerCapabilities {
             retrigger_characters: Some(vec![",".to_string()]),
             work_done_progress_options: Default::default(),
         }),
+        inlay_hint_provider: Some(OneOf::Left(true)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
         document_symbol_provider: Some(OneOf::Left(true)),

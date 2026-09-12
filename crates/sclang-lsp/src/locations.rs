@@ -5,7 +5,7 @@
 //! differ from the one on disk — so an open document always wins over the
 //! file.
 
-use crate::documents::DocumentStore;
+use crate::documents::{Document, DocumentStore};
 use crate::line_index::{LineIndex, PositionEncoding};
 use lsp_types::{Location, Url};
 
@@ -17,6 +17,17 @@ pub struct Resolver<'a> {
 impl<'a> Resolver<'a> {
     pub fn new(docs: &'a DocumentStore, enc: PositionEncoding) -> Self {
         Resolver { docs, enc }
+    }
+
+    /// A location inside a document already in hand.
+    ///
+    /// Locals never leave the buffer they are written in, so there is nothing
+    /// to look up and no file to read.
+    pub fn in_document(&self, uri: &Url, doc: &Document, range: std::ops::Range<u32>) -> Location {
+        Location {
+            uri: uri.clone(),
+            range: doc.line_index.range(&doc.text, range, self.enc),
+        }
     }
 
     /// Convert one index location, reading the target file if it is not open.

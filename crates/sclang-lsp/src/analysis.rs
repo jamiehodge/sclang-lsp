@@ -171,6 +171,85 @@ fn receiver_of(call: &SyntaxNode, dot_start: u32, source: &str) -> Receiver {
     }
 }
 
+/// A call the cursor is inside: its argument list and what it dispatches to.
+#[derive(Debug, Clone)]
+pub struct CallSite<'a> {
+    pub arg_list: &'a SyntaxNode,
+    pub selector: String,
+    pub receiver: Receiver,
+    /// The cursor, moved back over any trivia. Consumers that count commas or
+    /// test containment must use this rather than the raw offset, or a cursor
+    /// sitting in the space after a comma falls outside the call.
+    pub offset: u32,
+}
+
+/// The innermost call containing `offset`.
+///
+/// Innermost so that a call written inside an argument describes itself rather
+/// than the call it sits in. Shared by signature help, keyword-argument
+/// completion and inlay hints, which all need the same question answered.
+pub fn call_at<'a>(root: &'a SyntaxNode, source: &str, offset: u32) -> Option<CallSite<'a>> {
+    // A cursor in the space after a comma is still inside the call.
+    let offset = skip_trivia_back(root, offset);
+    let path = ancestors_at(root, offset);
+    let position = path.iter().rposition(|n| n.kind == SyntaxKind::ArgList)?;
+    let arg_list = path[position];
+    let call = path.get(position.checked_sub(1)?)?;
+    let (selector, receiver) = callee(call, arg_list, source)?;
+    Some(CallSite {
+        arg_list,
+        selector,
+        receiver,
+        offset,
+    })
+}
+
+/// The selector a call invokes, and what it is sent to.
+pub fn callee(
+    call: &SyntaxNode,
+    arg_list: &SyntaxNode,
+    source: &str,
+) -> Option<(String, Receiver)> {
+    match call.kind {
+        // `receiver.selector(...)`
+        SyntaxKind::MethodCall => {
+            let dot = call
+                .child_tokens()
+                .filter(|t| t.kind == SyntaxKind::Dot && t.end <= arg_list.start)
+                .last()?;
+            let selector = call
+                .child_tokens()
+                .find(|t| t.kind == SyntaxKind::Ident && t.start >= dot.end)?;
+            Some((
+                selector.text(source).to_string(),
+                receiver_of(call, dot.start, source),
+            ))
+        }
+
+        SyntaxKind::CallExpr => {
+            let head = call.child_nodes().next()?;
+            match head.kind {
+                // `Point(1, 2)` is `Point.new(1, 2)`.
+                SyntaxKind::ClassRef => {
+                    let class = head.token_of(SyntaxKind::ClassName)?;
+                    Some((
+                        "new".to_string(),
+                        Receiver::Class(class.text(source).to_string()),
+                    ))
+                }
+                // `foo(a, b)` is `a.foo(b)` — the receiver is the first
+                // argument, whose type is unknown.
+                SyntaxKind::NameRef => {
+                    let name = head.token_of(SyntaxKind::Ident)?;
+                    Some((name.text(source).to_string(), Receiver::Unknown))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// The role a token plays, as far as the server can act on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Point {
@@ -180,6 +259,12 @@ pub enum Point {
     Selector { name: String, receiver: Receiver },
     /// The name in a method definition: the `bar` of `bar { ... }`.
     MethodName { name: String, owner: Option<String> },
+    /// A name bound in an enclosing scope — an argument, a `var`, an instance
+    /// variable — either where it is used or where it is declared.
+    ///
+    /// Resolving it needs the tree rather than the index, so this carries only
+    /// the name and the caller looks it up against the scope at the point.
+    Local { name: String },
     /// Nothing the server has anything to say about.
     Nothing,
 }
@@ -222,6 +307,12 @@ fn classify(path: &TokenPath<'_>, source: &str) -> Point {
                     name: text,
                     owner: owner_of(path, source),
                 },
+                // A bare name used as a value, or the name being declared.
+                // Both want the same answer: where this binding comes from.
+                SyntaxKind::NameRef
+                | SyntaxKind::VarDef
+                | SyntaxKind::SlotDef
+                | SyntaxKind::RestArg => Point::Local { name: text },
                 _ => Point::Nothing,
             }
         }
@@ -361,5 +452,31 @@ mod tests {
     #[test]
     fn nothing_on_whitespace() {
         assert_eq!(point("Foo  ", 4), Point::Nothing);
+    }
+
+    #[test]
+    fn finds_a_local_where_it_is_used() {
+        assert_eq!(
+            point("{ var foo = 1; foo.postln; }", 15),
+            Point::Local { name: "foo".into() }
+        );
+    }
+
+    #[test]
+    fn finds_a_local_where_it_is_declared() {
+        assert_eq!(
+            point("{ var foo = 1; }", 6),
+            Point::Local { name: "foo".into() }
+        );
+    }
+
+    #[test]
+    fn finds_an_argument_where_it_is_declared() {
+        assert_eq!(
+            point("{ |freq = 440| freq }", 3),
+            Point::Local {
+                name: "freq".into()
+            }
+        );
     }
 }

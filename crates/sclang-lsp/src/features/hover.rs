@@ -7,6 +7,7 @@
 use crate::analysis::{point_at, resolve_selector, Bias, Point, Receiver};
 use crate::documents::Document;
 use crate::line_index::PositionEncoding;
+use crate::scope::{locals_at, Local, LocalKind};
 use lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind};
 use sclang_index::{Method, MethodKind, SymbolIndex};
 use std::fmt::Write;
@@ -31,6 +32,12 @@ pub fn hover(
                 .method(&owner, &name, MethodKind::Instance)
                 .or_else(|| index.method(&owner, &name, MethodKind::Class))?;
             method_hover(method)
+        }
+        Point::Local { name } => {
+            let local = locals_at(root, &doc.text, offset)
+                .into_iter()
+                .find(|l| l.name == name)?;
+            local_hover(&local)
         }
         Point::Nothing => return None,
     };
@@ -111,6 +118,25 @@ fn selector_hover(index: &SymbolIndex, name: &str, receiver: &Receiver) -> Optio
         let _ = write!(out, "\n\n---\n{doc}");
     }
     Some(out)
+}
+
+fn local_hover(local: &Local) -> String {
+    let keyword = match local.kind {
+        // An argument is written between pipes or after `arg`, with no
+        // keyword of its own to echo back.
+        LocalKind::Argument => "",
+        LocalKind::Variable | LocalKind::InstanceVar => "var ",
+        LocalKind::ClassVar => "classvar ",
+        LocalKind::Constant => "const ",
+    };
+
+    let mut out = format!("```supercollider\n{keyword}{}", local.name);
+    if let Some(default) = &local.default {
+        let _ = write!(out, " = {default}");
+    }
+    out.push_str("\n```");
+    let _ = write!(out, "\n\n*{}*", local.kind.describe());
+    out
 }
 
 fn method_hover(m: &Method) -> String {
