@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
+name = "sclang-index"
+version = "0.1.0"
+dependencies = [
+ "sclang-syntax",
+]
+
+[[package]]
 name = "sclang-syntax"
 version = "0.1.0"

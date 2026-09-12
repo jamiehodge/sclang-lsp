@@ -48,7 +48,7 @@ the resulting server is a standalone binary.
 - [x] CST — lossless, round-trips every file in the corpus
 - [x] Differential oracles — token-for-token against sclang's own lexer,
       symbol-for-symbol against its compiled class library
-- [ ] Symbol index
+- [x] Symbol index — classes, methods, args, accessors, docs
 - [ ] LSP server
 
 ## Conformance
@@ -117,6 +117,9 @@ axis only: upstream splits whitespace by character class (`Space`/`NewLine`/
 
 ### Symbols: against the compiled class library
 
+This checks the real `sclang-index`, not a throwaway copy — so the index ships
+already validated.
+
 Parse rates say a tree was produced, not that it is *correct*. To check
 correctness, `oracle/` asks a running sclang what classes and methods it
 actually compiled — names, class/instance, argument names, source positions —
@@ -149,6 +152,22 @@ what an index needs. It does not compare expression structure. `DumpParseNode.cp
 would give a full parse tree, but nothing in sclang ever calls `dump()` — no
 flag, no primitive, no caller — so reaching it would mean patching and
 rebuilding SuperCollider.
+
+## Parse-tree dump
+
+`DumpParseNode.cpp` has been in SuperCollider for years with no caller: no
+flag, no primitive, nothing. `oracle/expose-dumpparsenode.patch` adds an
+env-var hook so class-library compilation emits each file's parse tree.
+
+```bash
+./oracle/build-sclang-dump.sh          # clone, patch, build sclang only
+SCLANG_DUMP_PARSE=1 <build>/lang/sclang -a -l conf.yaml -i none quit.scd
+```
+
+That produces 1,207 parse trees for the core class library. It is the only
+oracle that can validate expression *structure* — the symbol oracle sees
+declarations only. Consuming it still needs a translation layer, since sclang's
+IR is shaped for a code generator rather than as a CST.
 
 ## Stability properties
 
