@@ -150,6 +150,38 @@ would give a full parse tree, but nothing in sclang ever calls `dump()` — no
 flag, no primitive, no caller — so reaching it would mean patching and
 rebuilding SuperCollider.
 
+## Stability properties
+
+The parser exists because sclang's own cannot handle incomplete input, so the
+properties worth asserting are about edits, not about well-formed files.
+
+Note that the naive idempotence property — parse, print, reparse, compare — is
+*trivially* true for a lossless tree: printing returns the source byte for
+byte, so reparsing is the same call twice. One test pins it as a guard, but it
+finds nothing alone. What finds bugs is stability under truncation and
+mutation:
+
+```bash
+cargo run --release --example stability -- <dir>...
+```
+
+```
+files              : 682
+prefixes parsed    : 357,716
+mutations parsed   : 27,200
+panics             : 0
+losslessness breaks: 0
+```
+
+Every prefix of every file is what the parser sees on each keystroke, so
+parsing all of them is a direct simulation of typing the class library from
+scratch. Mutations add random single-character deletions and delimiter
+insertions.
+
+These have teeth: injecting a one-line bug into the tree builder (dropping
+trailing tokens) fails 6 of the 8 idempotence tests and makes the sweep report
+the exact prefixes affected.
+
 ## Tests
 
 ```bash
