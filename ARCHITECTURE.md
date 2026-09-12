@@ -6,11 +6,14 @@ the code does not show them.
 ## The shape
 
 ```
-editor  <--stdio/LSP-->  sclang-lsp  <--UDP/OSC-->  sclang (supervised, optional)
+editor  <--stdio/LSP-->  sclang-lsp
+      \
+       \--OSC/other-->  sclang   (the editor's business, not the server's)
 ```
 
 The server owns the conversation with the editor and the truth about document
-text. sclang is something it *asks*, and can run without.
+text. It never spawns sclang, never talks to one, and does not care whether one
+exists.
 
 That inversion is the whole design. The existing `LanguageServer.quark` runs
 the language server *inside* the sclang image, which is why it cannot report a
@@ -25,78 +28,109 @@ Zed have never been supported — the issue has been open since 2024, and the
 plan of record was to add stdio support to sclang itself.
 
 None of that is needed. When the server is a separate process it owns stdio
-with the editor, and sclang keeps UDP, where it is already comfortable. No
-change to SuperCollider required.
+with the editor, and an editor that also wants a live sclang talks to it
+separately, on whatever channel it likes. No change to SuperCollider required.
 
-## Two tiers, and one rule
+## One tier
 
-**Tier 1 — static, always available.** Parse every `.sc` file with this crate
-and index it. Works before sclang boots, after it crashes, and on code that
-does not compile. This is the floor, not a fallback.
+Parse every `.sc` file with this crate and index it. That is the whole
+knowledge model: it works before sclang boots, after it crashes, on code that
+does not compile, and on a machine with no SuperCollider installed at all.
 
-**Tier 2 — the live image, best effort.** Only what an image can answer:
-`~envir` contents, SCDoc rendering, runtime-resolved dispatch, server state,
-evaluation.
+This was once described here as tier 1 of two, with a tier 2 that supervised a
+live image for `~envir` contents, SCDoc rendering and evaluation. That idea is
+dropped. Everything needing a running image belongs to the editor, which is
+already managing one for the user.
 
-**The rule: no LSP request may block on tier 2.** Async with a timeout,
-degrade to tier 1. That single constraint is what keeps completion instant
-while sclang is booting, recompiling, wedged in a user's `while` loop, or dead.
+The cost of dropping it is small and specific, and it is listed under
+*Deliberately not done* below rather than hidden.
 
 ### The test that keeps it honest
 
-**Delete sclang, start the server, and confirm completion and
-goto-definition still work on the class library.** If that fails, the layering
-has drifted and tier 2 has become load-bearing. Worth writing early.
+**Delete sclang, start the server, and confirm completion and goto-definition
+still work on the class library.** `crates/sclang-lsp/tests/no_sclang.rs` runs
+the shipped binary over real stdio with an empty `PATH`, so no sclang can be
+found even if something later tries to look for one.
 
-Reflection data may be *cached* to disk and reused — that is a build artefact,
-not a runtime dependency. But it must never be the only source: merge with
-static as the base, and never let a missing enrichment remove a symbol.
+With one tier this is no longer a layering check but a standing guarantee: if
+it ever fails, something has grown a dependency that the design says cannot
+exist.
 
-## Diagnostics, from three sources
+## Diagnostics
 
-1. **Parser errors** — live, per keystroke. Already produced by
-   `sclang-syntax`; nothing else needed.
-2. **Supervised sclang stdout** — class-library compile errors, which sclang
-   prints as `in <file> line <n> char <m>` (PyrLexer.cpp). Nobody can capture
-   these today. Owning the child process is all it takes, and it is the most
-   requested missing feature.
-3. **Conservative semantic lints** over the index — unknown class, method not
+1. **Parser errors** — live, per keystroke. Produced by `sclang-syntax`;
+   nothing else needed.
+2. **Conservative semantic lints** over the index — unknown class, method not
    found, arity mismatch. Keep these narrow: fire only when the receiver is a
    literal class name. SuperCollider is dynamically typed and false positives
    here are worse than silence.
 
+Class-library compile errors — which sclang prints as `in <file> line <n> char
+<m>` and which nothing can capture today — used to be listed here as a third
+source, to be read from a supervised sclang's stdout. They still cannot be
+captured by anything, and they are still the most requested missing feature.
+But owning the child process is all it takes, and it does not have to be *this*
+process: an editor extension that spawns sclang can parse those lines and
+publish them itself. In VS Code that is `createDiagnosticCollection`, with no
+language server involved.
+
 ## Documents
 
-The server owns text: a rope, real incremental edits, version tracking. sclang
-never sees a document — it sees a source string and a path when asked to
-evaluate something. That deletes the entire `LSPDocument`/`Document`
-impedance mismatch that the quark carries.
+The server owns text: real incremental edits, version tracking, and the buffer
+always beating the file on disk. Nothing else is consulted about what a buffer
+contains. That deletes the entire `LSPDocument`/`Document` impedance mismatch
+that the quark carries.
 
-## The sclang side, if it is ever needed
+## Evaluation belongs to the editor
 
-Kept as small as it can be defended, and **not a quark**.
+Running code is not in the language server's remit. LSP covers language
+intelligence; execution is the editor's, or a debug adapter's. Every other
+ecosystem arranges it that way — Calva owns the Clojure REPL, the Python
+extension owns its terminals, and neither routes execution through a language
+server.
 
-A quark is user-installed, so it version-skews against the server and produces
-bug reports nobody can reproduce. Instead: the server already spawns sclang
-with `-l <config>` (as the VSCode extension does), so it can generate that
-config with a private `includePaths` entry pointing at a directory it
-materialises from bytes compiled into the binary. The user installs nothing and
-skew is structurally impossible.
+The quark does route it through LSP, via a custom
+`textDocument/evaluateSelection` method, but only because it was already living
+inside sclang with a connection open. That is an accident of its architecture,
+not a design.
 
-Rules for that sidecar: an OSC responder, evaluation, environment
-introspection. **No `SystemOverwrites`, no document interception, no boot-order
-changes.** The quark's `extMain.sc` replaces `Main.startup` and skips
-`StartUp.run`, which is why code behaves differently under it — that must not
-recur. If the sidecar seems to need `SystemOverwrites`, something belongs in
-the server instead.
+So there is no sclang-side component here, and no plan for one. An editor that
+wants evaluation, a post window, server control or `~envir` introspection
+spawns sclang itself and keeps it entirely separate from this server. In
+Neovim and Emacs, scnvim and scel already do exactly that, and offer no
+language intelligence — the two halves fit together without overlapping.
 
-Evaluation goes on its own channel, never the analysis path, so a long-running
-expression cannot freeze completion.
+This also removes a whole category of failure that the two-tier design had to
+legislate against: nothing can block on a live image, because nothing talks to
+one.
+
+## sclang at development time
+
+None of the above applies to the oracles. `oracle/` asks a running sclang what
+classes and methods it compiled, and diffs that against what this crate
+extracts from the same files; `lexer_oracle` diffs token streams against
+upstream's `sc_lexer`; `tree_oracle` compares against a patched sclang's parse
+dump.
+
+Those are how the parser earns its claim to fidelity, and they run on a
+developer's machine, never on a user's. "No dependency on sclang" is a
+statement about the shipped binary.
 
 ## Deliberately not done
 
+- **No talking to sclang.** Not spawned, not connected to, not required. See
+  above.
+- **No `~envir` completion.** Environment variables live in a running image and
+  nothing static can enumerate them. This is the one real capability given up
+  by dropping the live tier, and it is worth the exchange.
 - **No type inference.** Without types, `implementors()` — every class defining
-  a selector — is the honest answer for completion after a `.`.
+  a selector — is the honest answer for completion after a `.`. Inlay hints and
+  keyword-argument completion go further and stay silent unless the receiver is
+  a literal class name, because both render as though they were in the source
+  and a guess there would read as a fact.
+- **No renaming methods.** Dispatch is dynamic, so nothing distinguishes one
+  class's `play` from another's. Rename runs only where the occurrence set is
+  provably complete: function locals and class names.
 - **No linking `sc_lexer`.** Upstream's lexer is used as a *test oracle*, not a
   dependency, so the crate stays pure Rust and cross-compiles without a C++
   toolchain. Their C++ API is newer and moves faster than the language does.

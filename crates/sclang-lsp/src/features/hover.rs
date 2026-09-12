@@ -1,8 +1,8 @@
 //! Hover.
 //!
 //! What can be said without a running image: a class and its superclass
-//! chain, a method's signature and the comment above it. SCDoc rendering is
-//! tier 2 and deliberately absent — see ARCHITECTURE.md.
+//! chain, a method's signature and the comment above it. SCDoc lives in
+//! separate `.schelp` files and is not read yet.
 
 use crate::analysis::{point_at, resolve_selector, Bias, Point, Receiver};
 use crate::documents::Document;

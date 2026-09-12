@@ -3,8 +3,8 @@
 //!
 //! It runs the real binary, over real stdio, in an environment with nothing on
 //! `PATH` — so no `sclang` can be found or launched even if something later
-//! tries. If this ever fails, tier 2 has become load-bearing and the layering
-//! described in ARCHITECTURE.md has drifted.
+//! tries. The design says nothing here may contact a running image, so if this
+//! ever fails something has grown a dependency that is not supposed to exist.
 //!
 //! Running the shipped binary also covers what the in-process tests cannot:
 //! that stdio framing is correct, and that nothing in the server writes stray

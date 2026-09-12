@@ -1,7 +1,7 @@
 //! Syntax diagnostics, straight from the parser.
 //!
-//! These are the first of the three sources ARCHITECTURE.md lists. They cost
-//! nothing extra — the tree is already built for everything else — and they
+//! The first of the two sources ARCHITECTURE.md lists. They cost nothing
+//! extra — the tree is already built for everything else — and they
 //! are available per keystroke, on a file that has never been saved, with no
 //! sclang running.
 

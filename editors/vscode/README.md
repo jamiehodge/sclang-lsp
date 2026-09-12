@@ -1,10 +1,18 @@
 # SuperCollider for VS Code, via `sclang-lsp`
 
 Language features served by [`sclang-lsp`](../../README.md): diagnostics as you
-type, completion, hover, goto-definition, and document and workspace symbols.
+type, completion, signature help, inlay hints, hover, goto-definition,
+references, rename, and document and workspace symbols.
 
 The server parses SuperCollider itself, so all of it works with sclang absent,
 broken, or busy — including on a class library that does not compile.
+
+**It does not run SuperCollider code.** No evaluation, no post window, no
+server control. Those need a live sclang and belong to the editor rather than
+to a language server, so this extension is for reading and navigating code, not
+for playing it. It is currently either/or with `vscode-supercollider`: both
+contribute the `supercollider` language, so enabling the two means two servers
+answering every request.
 
 ## Running it locally
 
@@ -76,11 +84,11 @@ or set to `onUnlessPressed`. They need no cursor and appear on their own.
 
 ## What it does not do
 
-No evaluation, no post window, no server control. Those need a live sclang, and
-they are the editor's job rather than the language server's — running code is
-not in the LSP's remit, and the existing `vscode-supercollider` routes it
-through a custom `textDocument/evaluateSelection` method only because its server
-already lived inside sclang.
+No evaluation, no post window, no server control. Running code is not in the
+LSP's remit — every other ecosystem puts execution in the editor, and
+`vscode-supercollider` routes it through a custom `textDocument/evaluateSelection`
+method only because its server already lived inside sclang with a connection
+open. That is an accident of its architecture, not a design to copy.
 
 **Do not enable this alongside `vscode-supercollider`.** Both contribute the
 `supercollider` language, so you would get two servers answering and duplicate

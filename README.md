@@ -42,8 +42,25 @@ No runtime dependency on sclang. The derivation happens at development time;
 the resulting server is a standalone binary.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime design: the process
-topology, why the server owns stdio, the two-tier knowledge model and the rule
-that keeps it honest.
+topology, why the server owns stdio, and why running code belongs to the editor
+rather than to a language server.
+
+## Scope
+
+This is language intelligence, not a SuperCollider environment. It reads and
+understands code: diagnostics, completion, signature help, inlay hints, hover,
+goto-definition, references, rename, symbols.
+
+**It does not run anything.** No evaluation, no post window, no server control,
+no `~envir` introspection — all of which need a live sclang, and none of which
+are the language server's job. The server never spawns sclang and never talks
+to one.
+
+In Neovim and Emacs that makes it the missing half: `scnvim` and `scel` already
+manage an sclang and provide no language intelligence, so the two sit side by
+side without overlapping. In VS Code it is currently either/or, because
+`vscode-supercollider` contributes the `supercollider` language itself and two
+extensions claiming it means two servers answering every request.
 
 ## Status
 
@@ -59,9 +76,8 @@ that keeps it honest.
 ## The server
 
 `sclang-lsp` speaks LSP over **stdio**, so it is started by an editor rather
-than run by hand. It answers from parsed source alone — the two-tier model in
-[ARCHITECTURE.md](ARCHITECTURE.md) with only tier 1 built, and nothing in the
-crate spawns or contacts a running image.
+than run by hand. It answers from parsed source alone: nothing in the crate
+spawns sclang, contacts one, or needs one to exist.
 
 | Request | Behaviour |
 |---|---|
@@ -197,8 +213,9 @@ that were not meant. It refuses instance variables and classvars too: `var
 <count` generates the methods `count` and `count_`, and subclasses inherit
 both. Find-references has no such restriction, because a wrong row in a list
 costs a glance rather than a working program.
-`~envir` contents, SCDoc rendering and evaluation are all tier 2 and absent.
-See "Deliberately not done" in ARCHITECTURE.md.
+`~envir` contents cannot be enumerated without a running image and are the one
+real capability given up by never contacting one. No SCDoc rendering, no
+evaluation — see "Deliberately not done" in ARCHITECTURE.md.
 
 ### The test that keeps the layering honest
 

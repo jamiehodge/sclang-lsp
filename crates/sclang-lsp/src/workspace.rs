@@ -1,9 +1,8 @@
 //! Finding SuperCollider source on disk and indexing it.
 //!
-//! This is tier 1 from ARCHITECTURE.md: everything here works by reading
-//! files, so it is available before sclang boots, after it crashes, and when
-//! it is not installed. Nothing in this module may grow a dependency on a
-//! running image.
+//! Everything here works by reading files, so it is available before sclang
+//! boots, after it crashes, and when it is not installed at all. Nothing in
+//! this module may grow a dependency on a running image.
 
 use crate::references::ReferenceIndex;
 use sclang_index::SymbolIndex;
