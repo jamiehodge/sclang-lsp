@@ -113,11 +113,71 @@ the client re-queries as the prefix grows.
 
 ### In an editor
 
-A VS Code extension lives in [`editors/vscode`](editors/vscode). It is a thin
-client — it finds the binary, starts it on stdio, and gets out of the way — and
-needs no configuration while developing, since it looks for a `cargo build`
-result in the checkout it ships in. See its
-[README](editors/vscode/README.md) for the `F5` loop.
+Because the server speaks stdio, most editors need configuration rather than an
+implementation. That is the payoff from the topology in ARCHITECTURE.md: the
+quark speaks LSP over UDP, which is why Neovim, Helix and Zed were never
+supported by it.
+
+Get a binary from the [releases page](../../releases) or build one with
+`cargo build --release`. Clients that pass a `--stdio` flag are fine; the server
+ignores arguments it does not recognise.
+
+**VS Code.** An extension lives in [`editors/vscode`](editors/vscode). It finds
+the binary, starts it, and gets out of the way — no configuration needed while
+developing, since it looks for a `cargo build` result in the checkout it ships
+in. See its [README](editors/vscode/README.md) for the `F5` loop and for
+packaging a VSIX with the server bundled inside.
+
+**Neovim** (0.11 or newer, using the built-in client):
+
+```lua
+vim.filetype.add({ extension = { sc = "supercollider", scd = "supercollider" } })
+
+vim.lsp.config.sclang_lsp = {
+  cmd = { "sclang-lsp" },
+  filetypes = { "supercollider" },
+  root_markers = { ".git" },
+}
+vim.lsp.enable("sclang_lsp")
+```
+
+**Emacs**, with eglot (built in since 29). `sclang-mode` comes from
+[scel](https://github.com/supercollider/scel); any major mode will do:
+
+```elisp
+(add-to-list 'auto-mode-alist '("\\.scd?\\'" . sclang-mode))
+(with-eval-after-load 'eglot
+  (add-to-list 'eglot-server-programs '(sclang-mode . ("sclang-lsp"))))
+(add-hook 'sclang-mode-hook #'eglot-ensure)
+```
+
+**Helix**, in `~/.config/helix/languages.toml`. Omitting `grammar` means no
+syntax highlighting, since Helix ships no SuperCollider grammar:
+
+```toml
+[language-server.sclang-lsp]
+command = "sclang-lsp"
+
+[[language]]
+name = "supercollider"
+scope = "source.supercollider"
+file-types = ["sc", "scd"]
+comment-token = "//"
+language-servers = ["sclang-lsp"]
+```
+
+Neither `nvim-lspconfig` nor Helix ships a SuperCollider entry upstream, so
+these are hand-written for now.
+
+Only the VS Code path is exercised here; the three snippets above are offered
+untested, and corrections are welcome.
+
+### Alongside scnvim and scel
+
+Those already give Neovim and Emacs evaluation and a post window, and no
+language intelligence. This server is the other half and does not compete with
+them: running code is the editor's job, not the language server's, which is why
+there is no evaluation here to collide with theirs.
 
 ### What it will not do
 
