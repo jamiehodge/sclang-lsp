@@ -56,20 +56,25 @@ library, plus installed Extensions and quarks:
 
 ```
 files              : 682
-bytes              : 2,501,312
-tokens             : 804,840
+tokens             : 805,030
 error tokens       : 0 (0.0000%)
 lossless (tokens)  : ALL FILES
 ---- parser ----
-files parsed clean : 644 / 682 (94.43%)
-classes found      : 2,074
-methods found      : 12,260
+files parsed clean : 670 / 680 (98.53%)
+not valid UTF-8    : 2 (excluded)
+classes found      : 2,075
+methods found      : 12,263
 lossless (tree)    : ALL FILES
 ```
 
-The tree is lossless on *every* file, including the 38 with syntax the parser
-does not yet cover — error recovery keeps the rest of those files intact, which
-is the property that matters for an editor.
+**Every `.sc` class file in the corpus parses.** The 10 remaining failures are
+all `.scd` scripts, and 6 of those have genuinely unbalanced delimiters — files
+sclang rejects too. The rest are example scripts meant to be evaluated block by
+block rather than parsed as a unit.
+
+The tree is lossless on *every* file, failures included: error recovery keeps
+the rest of a broken file intact, which is the property that matters in an
+editor.
 
 Reproduce with:
 

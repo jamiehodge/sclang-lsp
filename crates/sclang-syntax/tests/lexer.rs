@@ -415,3 +415,14 @@ fn token_ranges_are_usable_for_lsp_positions() {
     assert_eq!(four_forty.text(src), "440");
     assert_eq!((four_forty.start, four_forty.end), (10, 13));
 }
+
+#[test]
+fn line_comment_ends_at_a_carriage_return() {
+    // Classic Mac line endings: stopping only at '\n' would make one comment
+    // swallow the rest of the file (PyrLexer.cpp comment1 stops at both).
+    let src = "// note\rx = 1;";
+    let t = tokenize(src);
+    assert_eq!((t[0].kind, t[0].text(src)), (LineComment, "// note"));
+    assert_eq!(t[1].kind, Whitespace);
+    assert_eq!(t[2].kind, Ident);
+}

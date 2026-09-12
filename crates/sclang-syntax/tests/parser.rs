@@ -361,3 +361,127 @@ fn a_typo_mid_file_leaves_later_classes_intact() {
         .collect();
     assert_eq!(classes.len(), 2, "{}", parse.root.debug_tree(src));
 }
+
+// =====================================================================
+// Constructs found by running against the real class library. Each of
+// these was a conformance failure that `lang11d` explained.
+// =====================================================================
+
+#[test]
+fn array_expansion_in_arguments() {
+    // `arglistv1 : '*' exprseq`
+    assert_eq!(
+        count("x = this.new1('control', *args);", SyntaxKind::SplatArg),
+        1
+    );
+    assert_eq!(count("x = Sum4(*a);", SyntaxKind::SplatArg), 1);
+}
+
+#[test]
+fn index_subranges() {
+    // `valrangex1 : expr1 '[' arglist1 DOTDOT ']' | ...`
+    for src in ["x = a[0..1];", "x = a[skip..];", "x = a[..n-1];"] {
+        assert_eq!(count(src, SyntaxKind::IndexRange), 1, "failed for {src}");
+    }
+    // Without a `..` it is an ordinary index, not a range.
+    assert_eq!(count("x = a[0];", SyntaxKind::IndexRange), 0);
+}
+
+#[test]
+fn value_call_shorthand() {
+    // `f.(args)` means `f.value(args)`.
+    assert_eq!(count("x = suggestNew.(n, in);", SyntaxKind::MethodCall), 1);
+}
+
+#[test]
+fn space_separated_pipe_arguments() {
+    // `slotdeflist : slotdef | slotdeflist optcomma slotdef` — the comma is
+    // optional, so `{|a b|}` declares two arguments.
+    let src = "f = {|a b| a < b};";
+    let parse = parse(src);
+    assert!(parse.is_ok(), "errors: {:?}", parse.errors);
+    assert_eq!(count(src, SyntaxKind::VarDef), 2);
+}
+
+#[test]
+fn defaults_without_an_equals_sign() {
+    // `slotdef : name optequal slotliteral` — `optequal` is genuinely optional.
+    let src = "f = {|action, start = 0, range -1| action};";
+    let parse = parse(src);
+    assert!(parse.is_ok(), "errors: {:?}", parse.errors);
+    assert_eq!(count(src, SyntaxKind::VarDef), 3);
+}
+
+#[test]
+fn parenthesised_defaults() {
+    let src = "Foo { writeDefFile { arg dir, overwrite(true); ^dir } }";
+    let parse = parse(src);
+    assert!(parse.is_ok(), "errors: {:?}", parse.errors);
+    assert_eq!(count(src, SyntaxKind::VarDef), 2);
+}
+
+#[test]
+fn negative_defaults_in_pipe_arguments() {
+    let src = "f = {|min = -90, max = 6| min};";
+    let parse = parse(src);
+    assert!(parse.is_ok(), "errors: {:?}", parse.errors);
+}
+
+#[test]
+fn while_is_an_ordinary_identifier() {
+    // `name : NAME | WHILE` — outside the generator syntax `while` is a method.
+    for src in ["x = while { a } { b };", "x = while({ a },{ b });"] {
+        let parse = parse(src);
+        assert!(parse.is_ok(), "errors for {src}: {:?}", parse.errors);
+    }
+}
+
+#[test]
+fn pi_suffixed_numbers() {
+    // `floatp : floatr pie | integer pie | pie`
+    for src in ["x = 0.5pi;", "x = 2pi;", "x = pi;"] {
+        let parse = parse(src);
+        assert!(parse.is_ok(), "errors for {src}: {:?}", parse.errors);
+        assert_eq!(count(src, SyntaxKind::Literal), 1, "failed for {src}");
+    }
+}
+
+#[test]
+fn event_keys_may_be_any_expression() {
+    // `dictslotdef : exprseq ':' exprseq | keybinop exprseq`
+    assert_eq!(count("x = (0: 0, 1: 1, 2: 2);", SyntaxKind::KeywordArg), 3);
+    assert_eq!(
+        count(
+            "x = (\"serverInfo\": a, \"capabilities\": b);",
+            SyntaxKind::KeywordArg
+        ),
+        2
+    );
+}
+
+#[test]
+fn event_values_may_carry_a_trailing_semicolon() {
+    // `exprseq : exprn optsemi`
+    let src = "Foo { bar { ^(\"a\": x, \"b\": y;) } }";
+    let parse = parse(src);
+    assert!(parse.is_ok(), "errors: {:?}", parse.errors);
+}
+
+#[test]
+fn destructuring_with_a_rest_element() {
+    let src = "#cmdName ...path = cmdPath;";
+    let parse = parse(src);
+    assert!(parse.is_ok(), "errors: {:?}", parse.errors);
+    assert_eq!(count(src, SyntaxKind::MultiAssignExpr), 1);
+}
+
+#[test]
+fn adjacent_string_literals_concatenate() {
+    // Done by the lexer, not the grammar (PyrLexer.cpp:844) — `lang11d` has
+    // only `string : STRING`.
+    let src = "x = Error(\"first part \"\n    \"second part\").throw;";
+    let parse = parse(src);
+    assert!(parse.is_ok(), "errors: {:?}", parse.errors);
+    // Both literals are one token, so one Literal node.
+    assert_eq!(count(src, SyntaxKind::Literal), 1);
+}

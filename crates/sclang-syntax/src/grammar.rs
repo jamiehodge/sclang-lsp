@@ -279,6 +279,36 @@ fn arg_decls(p: &mut Parser) {
     }
 }
 
+/// `slotdef : name optequal slotliteral` — `optequal` really is optional, so
+/// `|range -1|` declares `range` with a default of `-1`.
+///
+/// Only a literal (optionally negated) counts, which is what keeps `|a b|`
+/// reading as two argument names rather than a name and a default.
+fn at_bare_default(p: &Parser) -> bool {
+    let k = if p.current() == Minus {
+        p.nth(1)
+    } else {
+        p.current()
+    };
+    matches!(
+        k,
+        Integer
+            | Float
+            | RadixInteger
+            | HexInteger
+            | Accidental
+            | String
+            | Symbol
+            | Char
+            | TrueKw
+            | FalseKw
+            | NilKw
+            | InfKw
+            | PiKw
+            | Hash
+    )
+}
+
 /// `funcvardecl : VAR vardeflist ';'`
 fn var_decls(p: &mut Parser) {
     let m = p.start();
@@ -321,12 +351,21 @@ fn var_def_list(p: &mut Parser, terminators: &[SyntaxKind]) {
             p.bump();
             expr(p);
             p.expect(RParen);
-        } else if p.eat(Eq) {
+        } else if p.eat(Eq) || (pipe_form && at_bare_default(p)) {
             // Inside `| ... |` a bare binary expression would swallow the
             // closing pipe, since `|` is also an operator. Take only a primary
             // there, which is how sclang's grammar scopes it too.
             if pipe_form {
-                primary_expr(p);
+                // `min = -90` is common, so a leading unary minus still has to
+                // be taken even though a full binary expression cannot be.
+                if p.at(Minus) {
+                    let neg = p.start();
+                    p.bump();
+                    primary_expr(p);
+                    neg.complete(p, UnaryExpr);
+                } else {
+                    primary_expr(p);
+                }
             } else {
                 expr(p);
             }
@@ -750,6 +789,10 @@ fn multi_assign(p: &mut Parser) -> CompletedMarker {
             p.error("expected a name in destructuring assignment");
             break;
         }
+        // `#a ...rest = x` — no comma before the rest element.
+        if p.at(Ellipsis) {
+            continue;
+        }
         if !p.eat(Comma) {
             break;
         }
@@ -784,9 +827,21 @@ fn paren_or_series(p: &mut Parser) -> CompletedMarker {
                 let kv = p.start();
                 p.bump();
                 expr(p);
+                p.eat(Semicolon);
                 kv.complete(p, KeywordArg);
             } else if p.at_any(EXPR_START) {
+                // `dictslotdef : exprseq ':' exprseq` — the key may be any
+                // expression, as in `(0: 0, 1: 1)`.
+                let kv = p.start();
                 expr(p);
+                if p.eat(Colon) {
+                    expr(p);
+                    // `exprseq : exprn optsemi` — the value may end with `;`.
+                    p.eat(Semicolon);
+                    kv.complete(p, KeywordArg);
+                } else {
+                    kv.abandon(p);
+                }
             } else {
                 p.error(format!("unexpected {:?} in event literal", p.current()));
                 p.recover_until(&[Comma, RParen]);
@@ -804,7 +859,7 @@ fn paren_or_series(p: &mut Parser) -> CompletedMarker {
         return m.complete(p, ParenExpr);
     }
 
-    expr(p);
+    let first = expr(p);
 
     // `(a, b .. c)` — the step form.
     if p.at(Comma) {
@@ -826,6 +881,51 @@ fn paren_or_series(p: &mut Parser) -> CompletedMarker {
         }
         p.expect(RParen);
         return m.complete(p, ParenExpr);
+    }
+
+    // `(0: 0, ...)` — an event literal whose first key is not an identifier.
+    if p.at(Colon) {
+        // The key was parsed before we knew it was one, so wrap it and the
+        // value together retroactively.
+        if let Some(key) = first {
+            let kv = key.precede(p);
+            p.bump();
+            expr(p);
+            // `exprseq : exprn optsemi` — the value may end with `;`.
+            p.eat(Semicolon);
+            kv.complete(p, KeywordArg);
+        } else {
+            p.bump();
+            expr(p);
+            p.eat(Semicolon);
+        }
+        while p.eat(Comma) {
+            if !p.progressing() {
+                break;
+            }
+            if p.at(KeywordBinop) {
+                let kv = p.start();
+                p.bump();
+                expr(p);
+                p.eat(Semicolon);
+                kv.complete(p, KeywordArg);
+            } else if p.at_any(EXPR_START) {
+                let kv = p.start();
+                expr(p);
+                if p.eat(Colon) {
+                    expr(p);
+                    // `exprseq : exprn optsemi` — the value may end with `;`.
+                    p.eat(Semicolon);
+                    kv.complete(p, KeywordArg);
+                } else {
+                    kv.abandon(p);
+                }
+            } else {
+                break;
+            }
+        }
+        p.expect(RParen);
+        return m.complete(p, EventLiteral);
     }
 
     // `(a .. b)`

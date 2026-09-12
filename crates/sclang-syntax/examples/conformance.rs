@@ -66,11 +66,15 @@ fn main() {
     let mut classes_found = 0usize;
     let mut methods_found = 0usize;
     let mut error_messages: BTreeMap<std::string::String, usize> = BTreeMap::new();
+    let mut unreadable: Vec<PathBuf> = Vec::new();
     let mut first_error_context: Vec<std::string::String> = Vec::new();
 
     let started = std::time::Instant::now();
     for path in &files {
+        // Some older quarks ship Latin-1 rather than UTF-8. Report those
+        // separately instead of silently counting them as parse failures.
         let Ok(src) = std::fs::read_to_string(path) else {
+            unreadable.push(path.clone());
             continue;
         };
         let tokens = tokenize(&src);
@@ -167,11 +171,17 @@ fn main() {
         }
     );
     println!("---- parser ----");
+    let parsed_files = files.len() - unreadable.len();
     println!(
-        "files parsed clean: {files_parsed_clean} / {} ({:.2}%)",
-        files.len(),
-        100.0 * files_parsed_clean as f64 / files.len().max(1) as f64
+        "files parsed clean: {files_parsed_clean} / {parsed_files} ({:.2}%)",
+        100.0 * files_parsed_clean as f64 / parsed_files.max(1) as f64
     );
+    if !unreadable.is_empty() {
+        println!("not valid UTF-8   : {} (excluded)", unreadable.len());
+        for p in unreadable.iter().take(4) {
+            println!("    {}", p.display());
+        }
+    }
     println!("parse errors     : {parse_errors}");
     println!("classes found    : {classes_found}");
     println!("methods found    : {methods_found}");

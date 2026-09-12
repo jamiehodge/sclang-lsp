@@ -212,9 +212,14 @@ impl<'a> Lexer<'a> {
 
     /// `// ...` to end of line. The newline belongs to the following
     /// whitespace token, matching how editors expect comments to be ranged.
+    ///
+    /// Terminates on `\r` as well as `\n` (`PyrLexer.cpp` comment1:
+    /// `while (c != '\n' && c != '\r' && c != 0)`). Classic Mac line endings
+    /// still turn up in older quarks, and stopping only at `\n` makes a single
+    /// comment swallow the whole file.
     fn line_comment(&mut self) -> SyntaxKind {
         self.bump(); // second '/'
-        self.eat_while(|c| c != '\n');
+        self.eat_while(|c| c != '\n' && c != '\r');
         SyntaxKind::LineComment
     }
 
@@ -357,17 +362,47 @@ impl<'a> Lexer<'a> {
     }
 
     /// `"..."` with backslash escapes. Unterminated runs to end of input.
+    ///
+    /// Adjacent string literals concatenate, C-style: after the closing quote
+    /// sclang skips whitespace and, if another `"` follows, keeps accumulating
+    /// into the same token (`PyrLexer.cpp:844-851`). So
+    ///
+    /// ```text
+    /// Error("first part "
+    ///       "second part")
+    /// ```
+    ///
+    /// is a single string. This happens in the lexer, not the grammar —
+    /// `lang11d` has only `string : STRING`.
     fn string(&mut self) -> SyntaxKind {
-        while let Some(c) = self.bump() {
-            match c {
-                '\\' => {
-                    self.bump();
+        loop {
+            let mut terminated = false;
+            while let Some(c) = self.bump() {
+                match c {
+                    '\\' => {
+                        self.bump();
+                    }
+                    '"' => {
+                        terminated = true;
+                        break;
+                    }
+                    _ => {}
                 }
-                '"' => return SyntaxKind::String,
-                _ => {}
             }
+            if !terminated {
+                return SyntaxKind::Error;
+            }
+            // Look past whitespace for another quote. If there isn't one, the
+            // whitespace must stay outside this token.
+            let resume = self.pos;
+            self.eat_while(is_space);
+            if self.peek() == Some('"') {
+                self.bump();
+                continue;
+            }
+            self.pos = resume;
+            return SyntaxKind::String;
         }
-        SyntaxKind::Error
     }
 
     /// `'foo'`, the quoted symbol form.
