@@ -43,9 +43,9 @@ the resulting server is a standalone binary.
 
 ## Status
 
-- [x] Lexer — complete, 36 tests, clean over the full class library
-- [ ] Parser — grammar extracted from `lang11d`, actions not yet written
-- [ ] CST (lossless syntax tree)
+- [x] Lexer — 35 tests, zero error tokens over the full class library
+- [x] Parser — recursive descent from `lang11d`, with error recovery
+- [x] CST — lossless, round-trips every file in the corpus
 - [ ] Symbol index
 - [ ] LSP server
 
@@ -55,14 +55,21 @@ The lexer is checked against real SuperCollider source in bulk — the class
 library, plus installed Extensions and quarks:
 
 ```
-files            : 682
-bytes            : 2501312
-tokens           : 804840
-error tokens     : 0 (0.0000%)
-files w/ errors  : 0 (0.0%)
-lossless         : ALL FILES
-throughput       : 18.6 MB/s
+files              : 682
+bytes              : 2,501,312
+tokens             : 804,840
+error tokens       : 0 (0.0000%)
+lossless (tokens)  : ALL FILES
+---- parser ----
+files parsed clean : 644 / 682 (94.43%)
+classes found      : 2,074
+methods found      : 12,260
+lossless (tree)    : ALL FILES
 ```
+
+The tree is lossless on *every* file, including the 38 with syntax the parser
+does not yet cover — error recovery keeps the rest of those files intact, which
+is the property that matters for an editor.
 
 Reproduce with:
 

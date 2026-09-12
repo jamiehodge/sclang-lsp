@@ -14,8 +14,30 @@
 //! assert_eq!(tokens[0].kind, SyntaxKind::ClassName);
 //! ```
 
+mod grammar;
 mod kind;
 mod lexer;
+mod parser;
+mod tree;
 
 pub use kind::SyntaxKind;
 pub use lexer::{tokenize, Lexer, Token};
+pub use tree::{Child, Parse, SyntaxError, SyntaxNode};
+
+/// Parse SuperCollider source into a lossless concrete syntax tree.
+///
+/// Always returns a tree. Syntax errors are collected in [`Parse::errors`]
+/// rather than aborting, because the buffer an editor hands a language server
+/// is usually not yet valid.
+///
+/// ```
+/// let parse = sclang_syntax::parse("Foo : Bar { baz { ^1 } }");
+/// assert!(parse.is_ok());
+/// ```
+pub fn parse(source: &str) -> Parse {
+    let tokens = tokenize(source);
+    let mut p = parser::Parser::new(source, &tokens);
+    grammar::source_file(&mut p);
+    let (events, errors) = p.finish();
+    parser::build_tree(source, &tokens, events, errors)
+}

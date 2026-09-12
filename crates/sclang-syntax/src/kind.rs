@@ -121,9 +121,123 @@ pub enum SyntaxKind {
     Error,
     /// Synthetic end-of-file marker.
     Eof,
+
+    // =================================================================
+    // Node kinds. Everything above is produced by the lexer; everything
+    // below is produced by the parser. They share one enum so the tree can
+    // hold both, which is the usual arrangement for a lossless CST.
+    //
+    // Names follow the `lang11d` productions they come from, so the grammar
+    // and this list can be read side by side.
+    // =================================================================
+    /// The whole file (`root`).
+    SourceFile,
+
+    // ---- Top level ----------------------------------------------------
+    /// `Foo : Bar { ... }` (`classdef`).
+    ClassDef,
+    /// `Array[slot] : ArrayedCollection { ... }` — the indexed form's
+    /// `[slot]` part (`optname`).
+    IndexedSlot,
+    /// `: Bar` (`superclass`).
+    SuperClass,
+    /// `+ Foo { ... }` (`classextension`).
+    ClassExtension,
+
+    // ---- Class members ------------------------------------------------
+    /// `classvar <a, b;` / `var <>x;` / `const c = 1;` (`classvardecl`).
+    ClassVarDecl,
+    /// One `<name = value` entry in such a declaration (`rwslotdef`).
+    SlotDef,
+    /// The `<`, `>` or `<>` getter/setter marker on a slot.
+    RwSpec,
+    /// `foo { ... }`, `*foo { ... }`, `++ { ... }` (`methoddef`).
+    MethodDef,
+    /// `_Prim_Name` at the head of a method body (`primitive`).
+    Primitive,
+
+    // ---- Declarations inside a function -------------------------------
+    /// `arg a, b = 1;` or `|a, b = 1|` (`argdecls`).
+    ArgDecls,
+    /// `var a, b = 1;` (`funcvardecl`).
+    VarDecls,
+    /// One `name = default` entry in either of the above (`slotdef`/`vardef`).
+    VarDef,
+    /// `...rest` in an argument list.
+    RestArg,
+
+    // ---- Expressions --------------------------------------------------
+    /// A sequence of `;`-separated expressions (`exprseq`).
+    ExprSeq,
+    /// `^expr` (`retval`).
+    ReturnStmt,
+    /// `a + b`, including the optional adverb (`expr binop2 adverb expr`).
+    BinaryExpr,
+    /// `.x` or `.(expr)` on a binary operator (`adverb`).
+    Adverb,
+    /// `-a` (`UMINUS`).
+    UnaryExpr,
+    /// `a = b`, in all its forms.
+    AssignExpr,
+    /// `#a, b = c` — destructuring assignment (`'#' mavars '=' expr`).
+    MultiAssignExpr,
+    /// The `#a, b ...c` target list of a destructuring assignment.
+    MultiAssignTargets,
+    /// `foo(a, b)` or `foo { }`.
+    CallExpr,
+    /// `a.foo(b)`.
+    MethodCall,
+    /// The parenthesised or trailing-block arguments of a call.
+    ArgList,
+    /// `key: value` inside an argument list (`keyarg`).
+    KeywordArg,
+    /// `*args` — array expansion in an argument list (`arglistv1`).
+    SplatArg,
+    /// `a[1..2]`, `a[1..]`, `a[..2]` (`valrangex1`).
+    IndexRange,
+    /// `a[i]` (`expr1 '[' arglist1 ']'`).
+    IndexExpr,
+    /// `a.[i]` — the `at` shorthand.
+    DotIndexExpr,
+    /// `{ ... }`, a function literal (`block`).
+    FunctionBlock,
+    /// `( ... )`, a parenthesised expression or an event literal.
+    ParenExpr,
+    /// `(a, b .. c)` (`valrangexd`).
+    ArithSeries,
+    /// `[a, b, c]` or `Set[a, b]`.
+    Collection,
+    /// `#[a, b]` (`listlit`).
+    LiteralList,
+    /// `(a: 1, b: 2)`, an event literal (`dictslotlist`).
+    EventLiteral,
+    /// `` `expr `` (`'`' expr`).
+    RefExpr,
+    /// A literal token wrapped as an expression node.
+    Literal,
+    /// A bare identifier used as a value.
+    NameRef,
+    /// `~foo`.
+    EnvVarRef,
+    /// A class name used as a value.
+    ClassRef,
+
+    /// A node the parser could not make sense of. Its children are retained
+    /// so the tree stays lossless.
+    ErrorNode,
 }
 
 impl SyntaxKind {
+    /// True for kinds the lexer produces, false for kinds the parser produces.
+    pub fn is_token(self) -> bool {
+        (self as u16) <= (Self::Eof as u16)
+    }
+
+    /// True for internal tree nodes.
+    pub fn is_node(self) -> bool {
+        !self.is_token()
+    }
+
     /// Whitespace and comments: retained for losslessness, skipped by the
     /// parser.
     pub fn is_trivia(self) -> bool {
