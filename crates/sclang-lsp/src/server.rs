@@ -9,10 +9,11 @@ use crate::documents::{uri_to_path, DocumentStore};
 use crate::features;
 use crate::line_index::PositionEncoding;
 use crate::locations::Resolver;
+use crate::references::ReferenceIndex;
 use crate::workspace::{build_index, default_roots, IndexStats};
 
 use crossbeam_channel::{Receiver, Sender};
-use lsp_server::{Connection, ExtractError, Message, Notification, Request, Response};
+use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::Notification as _;
 use lsp_types::request::Request as _;
 use lsp_types::*;
@@ -23,6 +24,7 @@ use std::path::PathBuf;
 pub struct Server {
     docs: DocumentStore,
     index: SymbolIndex,
+    references: ReferenceIndex,
     enc: PositionEncoding,
     sender: Sender<Message>,
 }
@@ -30,6 +32,7 @@ pub struct Server {
 /// What the background scan sends back when it finishes.
 struct Scan {
     index: SymbolIndex,
+    references: ReferenceIndex,
     stats: IndexStats,
 }
 
@@ -47,13 +50,18 @@ impl Server {
         // Only now, with the editor unblocked, go and read the class library.
         let (scan_tx, scan_rx) = crossbeam_channel::bounded(1);
         std::thread::spawn(move || {
-            let (index, stats) = build_index(&roots);
-            let _ = scan_tx.send(Scan { index, stats });
+            let (index, references, stats) = build_index(&roots);
+            let _ = scan_tx.send(Scan {
+                index,
+                references,
+                stats,
+            });
         });
 
         let mut server = Server {
             docs: DocumentStore::default(),
             index: SymbolIndex::default(),
+            references: ReferenceIndex::default(),
             enc,
             sender: connection.sender.clone(),
         };
@@ -97,15 +105,20 @@ impl Server {
     /// the buffer has to win or symbols would silently go stale on startup.
     fn install(&mut self, scan: Scan) {
         self.index = scan.index;
+        self.references = scan.references;
         for (uri, doc) in self.docs.iter() {
-            self.index.index_file(&uri_to_path(uri), &doc.text);
+            let path = uri_to_path(uri);
+            self.index.index_file(&path, &doc.text);
+            self.references
+                .index_parsed(&path, &doc.text, &doc.parse().root);
         }
         let s = scan.stats;
         let message = format!(
-            "indexed {} files: {} classes, {} methods{}",
+            "indexed {} files: {} classes, {} methods, {} occurrences{}",
             s.files,
             s.classes,
             s.methods,
+            s.occurrences,
             if s.unreadable > 0 {
                 format!(" ({} not valid UTF-8, skipped)", s.unreadable)
             } else {
@@ -147,6 +160,43 @@ impl Server {
                     ))
                 })
             }
+            request::References::METHOD => self.handle::<request::References>(req, |s, p| {
+                let uri = p.text_document_position.text_document.uri.clone();
+                let (doc, offset) = s.locate(&p.text_document_position)?;
+                let resolver = Resolver::new(&s.docs, s.enc);
+                features::find_references::references(
+                    &uri,
+                    doc,
+                    &s.references,
+                    offset,
+                    p.context.include_declaration,
+                    &resolver,
+                )
+            }),
+            request::PrepareRenameRequest::METHOD => self
+                .handle_fallible::<request::PrepareRenameRequest>(req, |s, p| {
+                    let (doc, offset) = s
+                        .locate(&p)
+                        .ok_or_else(|| "that document is not open".to_string())?;
+                    features::rename::prepare_rename(doc, &s.index, offset, s.enc).map(Some)
+                }),
+            request::Rename::METHOD => self.handle_fallible::<request::Rename>(req, |s, p| {
+                let uri = p.text_document_position.text_document.uri.clone();
+                let (doc, offset) = s
+                    .locate(&p.text_document_position)
+                    .ok_or_else(|| "that document is not open".to_string())?;
+                let resolver = Resolver::new(&s.docs, s.enc);
+                features::rename::rename(
+                    &uri,
+                    doc,
+                    &s.index,
+                    &s.references,
+                    offset,
+                    &p.new_name,
+                    &resolver,
+                )
+                .map(Some)
+            }),
             request::HoverRequest::METHOD => self.handle::<request::HoverRequest>(req, |s, p| {
                 let (doc, offset) = s.locate(&p.text_document_position_params)?;
                 features::hover::hover(doc, &s.index, offset, s.enc)
@@ -201,16 +251,9 @@ impl Server {
     where
         R: lsp_types::request::Request,
     {
-        let (id, params) = match req.extract::<R::Params>(R::METHOD) {
+        let (id, params) = match extract_params::<R>(req) {
             Ok(pair) => pair,
-            Err(ExtractError::JsonError { method, error }) => {
-                log(&format!("bad params for {method}: {error}"));
-                return None;
-            }
-            Err(ExtractError::MethodMismatch(req)) => {
-                log(&format!("method mismatch on {}", req.method));
-                return None;
-            }
+            Err(response) => return response,
         };
 
         let result = f(self, params);
@@ -221,6 +264,40 @@ impl Server {
                 lsp_server::ErrorCode::InternalError as i32,
                 e.to_string(),
             )),
+        }
+    }
+
+    /// Dispatch a request whose failure the user should be told about.
+    ///
+    /// Rename refuses more often than it succeeds, and *why* is the useful
+    /// part — "this is a method and dispatch is dynamic" is guidance, where a
+    /// silent null would look like a broken server. The protocol carries that
+    /// as a request-failed error, which clients surface verbatim.
+    fn handle_fallible<R>(
+        &mut self,
+        req: Request,
+        f: impl FnOnce(&mut Self, R::Params) -> Result<R::Result, String>,
+    ) -> Option<Response>
+    where
+        R: lsp_types::request::Request,
+    {
+        let (id, params) = match extract_params::<R>(req) {
+            Ok(pair) => pair,
+            Err(response) => return response,
+        };
+
+        match f(self, params) {
+            Ok(result) => match serde_json::to_value(result) {
+                Ok(value) => Some(Response::new_ok(id, value)),
+                Err(e) => Some(Response::new_err(
+                    id,
+                    lsp_server::ErrorCode::InternalError as i32,
+                    e.to_string(),
+                )),
+            },
+            // -32803 is RequestFailed: the request was well formed and the
+            // server declined it, which is exactly this case.
+            Err(message) => Some(Response::new_err(id, -32803, message)),
         }
     }
 
@@ -265,8 +342,14 @@ impl Server {
                     // not remove its class from the index.
                     let path = uri_to_path(&uri);
                     match std::fs::read_to_string(&path) {
-                        Ok(text) => self.index.index_file(&path, &text),
-                        Err(_) => self.index.remove_file(&path),
+                        Ok(text) => {
+                            self.index.index_file(&path, &text);
+                            self.references.index_file(&path, &text);
+                        }
+                        Err(_) => {
+                            self.index.remove_file(&path);
+                            self.references.remove_file(&path);
+                        }
                     }
                     // Clear the squiggles: a closed file has no diagnostics.
                     self.send_diagnostics(uri, Vec::new(), None);
@@ -284,7 +367,12 @@ impl Server {
     /// Re-index one file from its buffer. Cheap: one file, one parse.
     fn reindex(&mut self, uri: &Url) {
         if let Some(doc) = self.docs.get(uri) {
-            self.index.index_file(&uri_to_path(uri), &doc.text);
+            let path = uri_to_path(uri);
+            self.index.index_file(&path, &doc.text);
+            // The buffer's tree is already built; parsing it again here would
+            // double the cost of every keystroke.
+            self.references
+                .index_parsed(&path, &doc.text, &doc.parse().root);
         }
     }
 
@@ -312,6 +400,41 @@ impl Server {
         // A send failure means the editor is gone; the loop will see the
         // closed channel and exit on its own.
         let _ = self.sender.send(msg.into());
+    }
+}
+
+/// Pull typed params out of a request, or produce the error response.
+///
+/// A request must always be answered. Logging the problem and returning
+/// nothing leaves the client waiting on an id that will never come — which is
+/// a hang, not a failure, and far harder to diagnose from the other end.
+#[allow(clippy::type_complexity)]
+fn extract_params<R>(req: Request) -> Result<(RequestId, R::Params), Option<Response>>
+where
+    R: lsp_types::request::Request,
+{
+    // Taken before `extract` consumes the request: without it the failure
+    // path has no id to answer on, which is how this hung in the first place.
+    let id = req.id.clone();
+
+    match req.extract::<R::Params>(R::METHOD) {
+        Ok(pair) => Ok(pair),
+        Err(ExtractError::JsonError { method, error }) => {
+            log(&format!("bad params for {method}: {error}"));
+            Err(Some(Response::new_err(
+                id,
+                lsp_server::ErrorCode::InvalidParams as i32,
+                format!("bad params for {method}: {error}"),
+            )))
+        }
+        Err(ExtractError::MethodMismatch(req)) => {
+            log(&format!("method mismatch on {}", req.method));
+            Err(Some(Response::new_err(
+                req.id,
+                lsp_server::ErrorCode::InternalError as i32,
+                format!("method mismatch on {}", req.method),
+            )))
+        }
     }
 }
 
@@ -427,6 +550,13 @@ pub fn capabilities(enc: PositionEncoding) -> ServerCapabilities {
         inlay_hint_provider: Some(OneOf::Left(true)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
+        references_provider: Some(OneOf::Left(true)),
+        rename_provider: Some(OneOf::Right(RenameOptions {
+            // Asked before the box opens, so a refusal explains itself instead
+            // of appearing after the user has typed a new name.
+            prepare_provider: Some(true),
+            work_done_progress_options: Default::default(),
+        })),
         document_symbol_provider: Some(OneOf::Left(true)),
         workspace_symbol_provider: Some(OneOf::Left(true)),
         ..Default::default()

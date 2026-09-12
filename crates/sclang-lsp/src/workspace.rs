@@ -5,6 +5,7 @@
 //! it is not installed. Nothing in this module may grow a dependency on a
 //! running image.
 
+use crate::references::ReferenceIndex;
 use sclang_index::SymbolIndex;
 use std::path::{Path, PathBuf};
 
@@ -17,6 +18,8 @@ pub struct IndexStats {
     pub unreadable: usize,
     pub classes: usize,
     pub methods: usize,
+    /// Name occurrences recorded for find-references.
+    pub occurrences: usize,
 }
 
 /// Where a stock SuperCollider install keeps its class library and
@@ -90,8 +93,12 @@ pub fn collect_sc_files(root: &Path) -> Vec<PathBuf> {
 }
 
 /// Index every `.sc` file under each root.
-pub fn build_index(roots: &[PathBuf]) -> (SymbolIndex, IndexStats) {
+///
+/// Both indexes are built from the same read, since the expensive parts are
+/// reading the file and parsing it, not walking the tree twice.
+pub fn build_index(roots: &[PathBuf]) -> (SymbolIndex, ReferenceIndex, IndexStats) {
     let mut index = SymbolIndex::default();
+    let mut references = ReferenceIndex::default();
     let mut stats = IndexStats::default();
 
     for root in roots {
@@ -99,6 +106,7 @@ pub fn build_index(roots: &[PathBuf]) -> (SymbolIndex, IndexStats) {
             match std::fs::read_to_string(&path) {
                 Ok(source) => {
                     index.index_file(&path, &source);
+                    references.index_file(&path, &source);
                     stats.files += 1;
                 }
                 Err(_) => stats.unreadable += 1,
@@ -108,7 +116,8 @@ pub fn build_index(roots: &[PathBuf]) -> (SymbolIndex, IndexStats) {
 
     stats.classes = index.class_count();
     stats.methods = index.method_count();
-    (index, stats)
+    stats.occurrences = references.occurrence_count();
+    (index, references, stats)
 }
 
 #[cfg(test)]
@@ -143,8 +152,10 @@ mod tests {
         std::fs::write(dir.join("A.sc"), "A : Object { *make { |n| ^n } }").unwrap();
         std::fs::write(dir.join("B.sc"), "B : A { play { ^1 } }").unwrap();
 
-        let (index, stats) = build_index(std::slice::from_ref(&dir));
+        let (index, references, stats) = build_index(std::slice::from_ref(&dir));
         assert_eq!(stats.files, 2);
+        assert!(stats.occurrences > 0);
+        assert!(!references.find("A", |_| true).is_empty());
         assert_eq!(index.class("B").unwrap().superclass.as_deref(), Some("A"));
         assert_eq!(
             index
@@ -164,7 +175,7 @@ mod tests {
         // 0xE9 is `é` in Latin-1 and invalid on its own in UTF-8.
         std::fs::write(dir.join("Bad.sc"), [b'/', b'/', 0xE9, b'\n']).unwrap();
 
-        let (index, stats) = build_index(std::slice::from_ref(&dir));
+        let (index, _references, stats) = build_index(std::slice::from_ref(&dir));
         assert_eq!(stats.files, 1);
         assert_eq!(stats.unreadable, 1);
         assert!(index.class("Good").is_some());

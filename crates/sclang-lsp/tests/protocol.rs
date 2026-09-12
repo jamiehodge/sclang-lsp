@@ -263,7 +263,7 @@ fn closing_a_buffer_falls_back_to_what_is_on_disk() {
 #[test]
 fn an_unknown_request_is_an_error_not_a_crash() {
     let mut h = Harness::start("unknown", &mini_library());
-    let id = h.send_request("textDocument/rename", serde_json::json!({}));
+    let id = h.send_request("textDocument/semanticTokens/full", serde_json::json!({}));
     let response = h.await_response(id);
     assert!(response.error.is_some());
 
@@ -443,4 +443,126 @@ fn no_inlay_hints_when_the_receiver_is_unknown() {
         hints.is_empty(),
         "labelling these would be a guess: {hints:?}"
     );
+}
+
+#[test]
+fn malformed_params_are_answered_rather_than_ignored() {
+    // A request must always get a response. Dropping one leaves the client
+    // waiting on an id that never comes, which is a hang rather than a
+    // failure and much harder to diagnose from the other end.
+    let mut h = Harness::start("bad-params", &mini_library());
+    let id = h.send_request("textDocument/rename", serde_json::json!({}));
+    let response = h.await_response(id);
+    assert!(response.error.is_some(), "{response:?}");
+}
+
+#[test]
+fn references_to_a_class_span_the_workspace() {
+    let mut h = Harness::start("refs-class", &mini_library());
+    let uri = h.open("Test.scd", "SinOsc.ar(440)");
+
+    let found: Vec<Location> = h.request(
+        "textDocument/references",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 0, "character": 2 },
+            "context": { "includeDeclaration": true },
+        }),
+    );
+    // The definition in SinOsc.sc and the use in the open buffer.
+    assert!(found.len() >= 2, "{found:?}");
+    assert!(found.iter().any(|l| l.uri.path().ends_with("SinOsc.sc")));
+    assert!(found.iter().any(|l| l.uri == uri));
+}
+
+#[test]
+fn references_to_a_local_stay_in_its_scope() {
+    let mut h = Harness::start("refs-local", &mini_library());
+    let uri = h.open("Test.scd", "{\n\tvar foo = 1;\n\tfoo + foo;\n}\n");
+    let _ = h.await_diagnostics(&uri);
+
+    let found: Vec<Location> = h.request(
+        "textDocument/references",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 2, "character": 2 },
+            "context": { "includeDeclaration": true },
+        }),
+    );
+    // The declaration and both uses, all in this buffer.
+    assert_eq!(found.len(), 3, "{found:?}");
+    assert!(found.iter().all(|l| l.uri == uri));
+}
+
+#[test]
+fn rename_rewrites_a_local_and_only_it() {
+    let mut h = Harness::start("rename-local", &mini_library());
+    let uri = h.open("Test.scd", "{\n\tvar foo = 1;\n\tfoo + foo;\n}\n");
+    let _ = h.await_diagnostics(&uri);
+
+    let edit: WorkspaceEdit = h.request(
+        "textDocument/rename",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 2, "character": 2 },
+            "newName": "bar",
+        }),
+    );
+    let changes = edit.changes.expect("changes");
+    let edits = changes.get(&uri).expect("edits for this file");
+    assert_eq!(edits.len(), 3);
+    assert!(edits.iter().all(|e| e.new_text == "bar"));
+}
+
+#[test]
+fn renaming_a_method_is_refused_with_a_reason() {
+    let mut h = Harness::start("rename-method", &mini_library());
+    let uri = h.open("Test.scd", "SinOsc.ar(440)");
+
+    let id = h.send_request(
+        "textDocument/rename",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 0, "character": 8 },
+            "newName": "audioRate",
+        }),
+    );
+    let response = h.await_response(id);
+    let error = response.error.expect("a refusal, not a silent null");
+    assert!(
+        error.message.contains("dispatches at run time"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn prepare_rename_refuses_before_the_box_opens() {
+    let mut h = Harness::start("prepare-rename", &mini_library());
+    let uri = h.open("Test.scd", "SinOsc.ar(440)");
+
+    // On the method: refused, with the reason.
+    let id = h.send_request(
+        "textDocument/prepareRename",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 0, "character": 8 },
+        }),
+    );
+    assert!(h.await_response(id).error.is_some());
+
+    // On the class: allowed, and it offers the current name.
+    let response: PrepareRenameResponse = h.request(
+        "textDocument/prepareRename",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 0, "character": 2 },
+        }),
+    );
+    match response {
+        PrepareRenameResponse::RangeWithPlaceholder { placeholder, .. } => {
+            assert_eq!(placeholder, "SinOsc");
+        }
+        other => panic!("expected a placeholder: {other:?}"),
+    }
 }

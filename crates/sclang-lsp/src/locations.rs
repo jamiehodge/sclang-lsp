@@ -8,6 +8,8 @@
 use crate::documents::{Document, DocumentStore};
 use crate::line_index::{LineIndex, PositionEncoding};
 use lsp_types::{Location, Url};
+use std::collections::HashMap;
+use std::path::Path;
 
 pub struct Resolver<'a> {
     docs: &'a DocumentStore,
@@ -17,6 +19,10 @@ pub struct Resolver<'a> {
 impl<'a> Resolver<'a> {
     pub fn new(docs: &'a DocumentStore, enc: PositionEncoding) -> Self {
         Resolver { docs, enc }
+    }
+
+    pub fn encoding(&self) -> PositionEncoding {
+        self.enc
     }
 
     /// A location inside a document already in hand.
@@ -32,8 +38,12 @@ impl<'a> Resolver<'a> {
 
     /// Convert one index location, reading the target file if it is not open.
     pub fn resolve(&self, loc: &sclang_index::Location) -> Option<Location> {
-        let uri = Url::from_file_path(&loc.file).ok()?;
-        let range = loc.name_range.start..loc.name_range.end;
+        self.at(&loc.file, loc.name_range.start..loc.name_range.end)
+    }
+
+    /// A byte range in a file, open or not.
+    pub fn at(&self, file: &Path, range: std::ops::Range<u32>) -> Option<Location> {
+        let uri = Url::from_file_path(file).ok()?;
 
         if let Some(doc) = self.docs.get(&uri) {
             return Some(Location {
@@ -42,11 +52,54 @@ impl<'a> Resolver<'a> {
             });
         }
 
-        let text = std::fs::read_to_string(&loc.file).ok()?;
+        let text = std::fs::read_to_string(file).ok()?;
         let index = LineIndex::new(&text);
         Some(Location {
             uri,
             range: index.range(&text, range, self.enc),
         })
+    }
+
+    /// Many ranges at once, reading each file no more than once.
+    ///
+    /// References to something like `postln` run to thousands of occurrences
+    /// spread over hundreds of files. Resolving them one at a time would read
+    /// and re-index the same file for every hit in it.
+    pub fn at_many<'r>(
+        &self,
+        items: impl IntoIterator<Item = (&'r Path, std::ops::Range<u32>)>,
+    ) -> Vec<Location> {
+        let mut cached: HashMap<&Path, Option<(String, LineIndex)>> = HashMap::new();
+        let mut out = Vec::new();
+
+        for (file, range) in items {
+            let Ok(uri) = Url::from_file_path(file) else {
+                continue;
+            };
+
+            // An open buffer overrides the file, and its line index is already
+            // built and maintained.
+            if let Some(doc) = self.docs.get(&uri) {
+                out.push(Location {
+                    uri,
+                    range: doc.line_index.range(&doc.text, range, self.enc),
+                });
+                continue;
+            }
+
+            let entry = cached.entry(file).or_insert_with(|| {
+                let text = std::fs::read_to_string(file).ok()?;
+                let index = LineIndex::new(&text);
+                Some((text, index))
+            });
+            if let Some((text, index)) = entry {
+                out.push(Location {
+                    uri,
+                    range: index.range(text, range, self.enc),
+                });
+            }
+        }
+
+        out
     }
 }

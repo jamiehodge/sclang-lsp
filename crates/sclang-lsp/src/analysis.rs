@@ -79,7 +79,8 @@ pub fn skip_trivia_back(root: &SyntaxNode, offset: u32) -> u32 {
     found.or(last_end).unwrap_or(offset)
 }
 
-fn visit_tokens(node: &SyntaxNode, f: &mut impl FnMut(&Token)) {
+/// Every token in a tree, in source order.
+pub fn visit_tokens(node: &SyntaxNode, f: &mut impl FnMut(&Token)) {
     for child in &node.children {
         match child {
             Child::Node(n) => visit_tokens(n, f),

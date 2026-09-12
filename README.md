@@ -54,7 +54,7 @@ that keeps it honest.
       symbol-for-symbol against its compiled class library
 - [x] Symbol index — classes, methods, args, accessors, docs
 - [x] LSP server — diagnostics, completion, signature help, inlay hints,
-      hover, goto-definition, symbols
+      hover, goto-definition, references, rename, symbols
 
 ## The server
 
@@ -71,6 +71,8 @@ crate spawns or contacts a running image.
 | `hover` | Signature, superclass chain, and the comment above the definition; for a local, what kind of binding it is and its default |
 | `definition` | Exact for a class name, a class receiver, or a local binding; every implementor otherwise |
 | `inlayHint` | The parameter each positional argument fills, for calls that resolve exactly |
+| `references` | Exact for a local or a class name; textual for a selector, since dispatch is dynamic |
+| `rename` | Function locals and class names only — see below |
 | `documentSymbol` | Classes with their methods nested |
 | `workspaceSymbol` | Classes and methods across the index |
 
@@ -123,8 +125,18 @@ No type inference, so `x.foo` offers every class defining `foo` rather than
 guessing which `x` is — and signature help lists every implementor's signature
 for the same reason. Inlay hints and keyword-argument completion go further and
 stay silent unless the receiver is a literal class name: both render as though
-they were in the source, so a guess there would read as a fact. No references,
-rename or semantic tokens yet.
+they were in the source, so a guess there would read as a fact. No semantic
+tokens or document highlight yet.
+
+**Rename renames only what it can enumerate completely**: arguments and `var`s
+inside a function body, whose uses cannot leave it, and class names, since only
+class names lex as `ClassName`. It refuses methods, and says why — `.play` is
+dispatched at run time, so nothing distinguishes one class's `play` from
+another's, and rewriting every `.play` in a workspace would break the classes
+that were not meant. It refuses instance variables and classvars too: `var
+<count` generates the methods `count` and `count_`, and subclasses inherit
+both. Find-references has no such restriction, because a wrong row in a list
+costs a glance rather than a working program.
 `~envir` contents, SCDoc rendering and evaluation are all tier 2 and absent.
 See "Deliberately not done" in ARCHITECTURE.md.
 
