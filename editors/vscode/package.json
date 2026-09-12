@@ -1,0 +1,99 @@
+{
+  "name": "sclang-lsp",
+  "displayName": "SuperCollider (sclang-lsp)",
+  "description": "Language features for SuperCollider, served by sclang-lsp. No sclang required.",
+  "version": "0.1.0",
+  "license": "GPL-3.0-or-later",
+  "publisher": "jamiehodge",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamiehodge/sclang-lsp"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:supercollider"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "supercollider",
+        "aliases": [
+          "SuperCollider",
+          "supercollider"
+        ],
+        "extensions": [
+          ".sc",
+          ".scd",
+          ".schelp"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "supercollider",
+        "scopeName": "source.supercollider",
+        "path": "./syntaxes/supercollider.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "sclang-lsp.restart",
+        "title": "Restart language server",
+        "category": "sclang-lsp"
+      },
+      {
+        "command": "sclang-lsp.showLog",
+        "title": "Show server log",
+        "category": "sclang-lsp"
+      }
+    ],
+    "configuration": {
+      "title": "sclang-lsp",
+      "properties": {
+        "sclang-lsp.server.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Absolute path to the `sclang-lsp` binary. When empty, the extension looks for a `cargo build` result next to the workspace, then falls back to `sclang-lsp` on `PATH`."
+        },
+        "sclang-lsp.classLibraryPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Directories to index instead of the platform defaults. Leave empty to let the server find the stock class library, `Extensions` and `downloaded-quarks` itself."
+        },
+        "sclang-lsp.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Log the traffic between VS Code and the server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.4.0"
+  }
+}

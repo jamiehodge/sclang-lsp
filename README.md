@@ -106,6 +106,14 @@ Requests after that are well under a millisecond, except completion on an
 unknown receiver, which is capped at 1,000 items and marked `isIncomplete` so
 the client re-queries as the prefix grows.
 
+### In an editor
+
+A VS Code extension lives in [`editors/vscode`](editors/vscode). It is a thin
+client — it finds the binary, starts it on stdio, and gets out of the way — and
+needs no configuration while developing, since it looks for a `cargo build`
+result in the checkout it ships in. See its
+[README](editors/vscode/README.md) for the `F5` loop.
+
 ### What it will not do
 
 No type inference, so `x.foo` offers every class defining `foo` rather than
