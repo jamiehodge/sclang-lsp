@@ -21,10 +21,16 @@ SinOsc.multiNew(\audio, 440);
 x.play;
 
 // ── 3. Signature help ───────────────────────────────────────────────────
-// Put the cursor between the parens. The parameter you are on is highlighted;
-// a comma advances it, and typing `mul:` jumps to that parameter wherever it
+// Type the opening paren below and the signature appears. A comma advances
+// the highlighted parameter, and typing `mul:` jumps to that one wherever it
 // sits in the list.
 SinOsc.ar();
+
+// Moving the cursor into parens that are *already* closed shows nothing, and
+// that is the editor rather than the server: VS Code asks for signature help
+// when you type `(` or `,`, not when the cursor merely arrives somewhere.
+// Press ⌘⇧Space — Trigger Parameter Hints — to ask for it explicitly.
+SinOsc.ar(440, 0, 0.2);
 
 // ── 4. Inlay hints ──────────────────────────────────────────────────────
 // The parameter each positional argument fills is shown inline.

@@ -63,6 +63,17 @@ exist for.
 
 Changing any of them restarts the server.
 
+## Two editor behaviours worth knowing
+
+**Signature help is not shown just because the cursor is inside a call.** VS
+Code requests it when you type `(` or `,`, or when you ask for it with ⌘⇧Space
+(*Trigger Parameter Hints*) — not when the cursor arrives in parens that are
+already closed. The server answers at every position inside a call; the editor
+simply does not ask on cursor movement.
+
+**Inlay hints follow `editor.inlayHints.enabled`**, which some setups turn off
+or set to `onUnlessPressed`. They need no cursor and appear on their own.
+
 ## What it does not do
 
 No evaluation, no post window, no server control. Those need a live sclang, and
