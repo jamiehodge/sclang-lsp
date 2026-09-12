@@ -16,7 +16,7 @@ source tree:
 | This crate | Derived from |
 |---|---|
 | `lexer.rs` | `PyrLexer.cpp` — the hand-written scanner |
-| parser (next) | `Bison/lang11d` — the bison grammar |
+| `parser.rs`, `grammar.rs` | `Bison/lang11d` — the bison grammar |
 
 The grammar extraction is mechanical: strip the semantic actions from
 `lang11d` (they are 80% of the file and entirely sclang-internal) and 325 lines
@@ -53,7 +53,78 @@ that keeps it honest.
 - [x] Differential oracles — token-for-token against sclang's own lexer,
       symbol-for-symbol against its compiled class library
 - [x] Symbol index — classes, methods, args, accessors, docs
-- [ ] LSP server
+- [x] LSP server — diagnostics, completion, hover, goto-definition, symbols
+
+## The server
+
+`sclang-lsp` speaks LSP over **stdio**, so it is started by an editor rather
+than run by hand. It answers from parsed source alone — the two-tier model in
+[ARCHITECTURE.md](ARCHITECTURE.md) with only tier 1 built, and nothing in the
+crate spawns or contacts a running image.
+
+| Request | Behaviour |
+|---|---|
+| `publishDiagnostics` | Parser errors, per keystroke |
+| `completion` | Class names; class-side methods after `Foo.`, inherited ones included; every selector otherwise |
+| `hover` | Signature, superclass chain, and the comment above the definition |
+| `definition` | Exact for a class name or a class receiver; every implementor otherwise |
+| `documentSymbol` | Classes with their methods nested |
+| `workspaceSymbol` | Classes and methods across the index |
+
+Document sync is incremental, and the buffer always wins over the file on
+disk — a class that exists only in an unsaved edit is immediately visible to
+completion everywhere else.
+
+Positions are negotiated: UTF-8 when the client offers it, UTF-16 otherwise,
+which is the protocol default.
+
+### Running it
+
+```bash
+cargo build --release
+```
+
+Point the editor at `target/release/sclang-lsp` for the `supercollider`
+language. The class library is found automatically in the usual place for the
+platform, along with `Extensions` and `downloaded-quarks`. To override that —
+a non-standard install, or a build tree — pass paths in
+`initializationOptions`, which replaces the guessed locations:
+
+```json
+{ "classLibraryPaths": ["/path/to/SCClassLibrary"] }
+```
+
+Indexing runs in the background, so `initialize` returns immediately. The
+server sends a `window/logMessage` when the scan completes; on this machine the
+stock class library takes about half a second:
+
+```
+indexed 611 files: 1751 classes, 14620 methods (2 not valid UTF-8, skipped)
+```
+
+Requests after that are well under a millisecond, except completion on an
+unknown receiver, which is capped at 1,000 items and marked `isIncomplete` so
+the client re-queries as the prefix grows.
+
+### What it will not do
+
+No type inference, so `x.foo` offers every class defining `foo` rather than
+guessing which `x` is. `~envir` contents, SCDoc rendering and evaluation are
+all tier 2 and absent. See "Deliberately not done" in ARCHITECTURE.md.
+
+### The test that keeps the layering honest
+
+ARCHITECTURE.md asks for one test above all others: delete sclang, start the
+server, and confirm completion and goto-definition still work. It runs the
+shipped binary over real stdio with an empty `PATH`:
+
+```bash
+cargo test -p sclang-lsp --test no_sclang
+```
+
+That also covers what in-process tests cannot — that the framing is correct and
+that nothing writes stray output to stdout, the failure that pushed
+`LanguageServer.quark` onto UDP in the first place.
 
 ## Conformance
 
