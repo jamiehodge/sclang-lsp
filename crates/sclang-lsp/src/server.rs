@@ -217,6 +217,15 @@ impl Server {
                         features::symbols::document_symbols(&uri, doc, s.enc),
                     ))
                 }),
+            request::SelectionRangeRequest::METHOD => self
+                .handle::<request::SelectionRangeRequest>(req, |s, p| {
+                    let doc = s.docs.get(&p.text_document.uri)?;
+                    Some(features::selection_range::selection_ranges(
+                        doc,
+                        &p.positions,
+                        s.enc,
+                    ))
+                }),
             request::WorkspaceSymbolRequest::METHOD => self
                 .handle::<request::WorkspaceSymbolRequest>(req, |s, p| {
                     let resolver = Resolver::new(&s.docs, s.enc);
@@ -557,6 +566,7 @@ pub fn capabilities(enc: PositionEncoding) -> ServerCapabilities {
             prepare_provider: Some(true),
             work_done_progress_options: Default::default(),
         })),
+        selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
         workspace_symbol_provider: Some(OneOf::Left(true)),
         ..Default::default()

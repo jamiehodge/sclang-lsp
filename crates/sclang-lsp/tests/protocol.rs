@@ -566,3 +566,94 @@ fn prepare_rename_refuses_before_the_box_opens() {
         other => panic!("expected a placeholder: {other:?}"),
     }
 }
+
+/// The chain that expand-selection walks, and that anything evaluating a
+/// block has to ask for. Counting parentheses is the alternative, and the
+/// second case here is the one it gets wrong.
+#[test]
+fn selection_range_widens_to_the_enclosing_block() {
+    let mut h = Harness::start("selrange", &mini_library());
+    let source = "(\n\tSinOsc.ar(440);\n)\n";
+    let uri = h.open("Block.scd", source);
+
+    // On `440`, inside the argument list, inside the call, inside the block.
+    let ranges: Vec<SelectionRange> = h.request(
+        "textDocument/selectionRange",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "positions": [{ "line": 1, "character": 11 }],
+        }),
+    );
+
+    let widths = chain(&ranges[0]);
+    // Innermost is the literal itself.
+    assert_eq!(
+        widths[0],
+        Range::new(Position::new(1, 11), Position::new(1, 14)),
+        "innermost should be `440`: {widths:?}"
+    );
+    // Outermost is the whole file; the one below it is the `( ... )` block.
+    let block = widths[widths.len() - 2];
+    assert_eq!(
+        block,
+        Range::new(Position::new(0, 0), Position::new(2, 1)),
+        "should widen to the parenthesised block: {widths:?}"
+    );
+}
+
+/// A parenthesis inside a string is text, not structure. This is where brace
+/// matching produces a block that stops in the wrong place.
+#[test]
+fn selection_range_ignores_parens_inside_strings_and_comments() {
+    let mut h = Harness::start("selrange-str", &mini_library());
+    let source = "(\n\t\"a ( b\".postln; // ) not structure\n\tSinOsc.ar(440);\n)\n";
+    let uri = h.open("Tricky.scd", source);
+
+    let ranges: Vec<SelectionRange> = h.request(
+        "textDocument/selectionRange",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "positions": [{ "line": 2, "character": 11 }],
+        }),
+    );
+
+    let widths = chain(&ranges[0]);
+    let block = widths[widths.len() - 2];
+    assert_eq!(
+        block,
+        Range::new(Position::new(0, 0), Position::new(3, 1)),
+        "the block runs to the real `)`, not the one in the string: {widths:?}"
+    );
+}
+
+/// Every step must select more than the one before it, or a keypress appears
+/// to do nothing.
+#[test]
+fn selection_range_never_repeats_a_range() {
+    let mut h = Harness::start("selrange-dedup", &mini_library());
+    let uri = h.open("Nested.scd", "((((1))))\n");
+
+    let ranges: Vec<SelectionRange> = h.request(
+        "textDocument/selectionRange",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "positions": [{ "line": 0, "character": 4 }],
+        }),
+    );
+
+    let widths = chain(&ranges[0]);
+    for pair in widths.windows(2) {
+        assert_ne!(pair[0], pair[1], "duplicate step in {widths:?}");
+    }
+}
+
+/// Innermost first, following the `parent` links outward.
+fn chain(range: &SelectionRange) -> Vec<Range> {
+    let mut out = vec![range.range];
+    let mut node = range.parent.as_deref();
+    while let Some(parent) = node {
+        out.push(parent.range);
+        node = parent.parent.as_deref();
+    }
+    out
+}
