@@ -9,7 +9,7 @@ use crate::line_index::{LineIndex, PositionEncoding};
 use lsp_types::{TextDocumentContentChangeEvent, Url};
 use sclang_syntax::{parse, Parse};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// One open buffer: its text, the revision the editor gave it, and the
 /// derived data kept in step with both.
@@ -113,6 +113,20 @@ impl DocumentStore {
 pub fn uri_to_path(uri: &Url) -> PathBuf {
     uri.to_file_path()
         .unwrap_or_else(|()| PathBuf::from(uri.as_str()))
+}
+
+/// The inverse of [`uri_to_path`].
+///
+/// A buffer that has never been saved has no path at all — the editor gives it
+/// a URI like `untitled:Untitled-1` — so `uri_to_path` keeps the URI itself as
+/// the key. Turning one of those back is parsing rather than path conversion,
+/// which is why this cannot be `Url::from_file_path` alone. An unsaved buffer
+/// is where a class is most likely to be *being written*, so dropping it here
+/// would lose exactly the definitions the user is working on.
+pub fn path_to_uri(path: &Path) -> Option<Url> {
+    Url::from_file_path(path)
+        .ok()
+        .or_else(|| Url::parse(&path.to_string_lossy()).ok())
 }
 
 #[cfg(test)]

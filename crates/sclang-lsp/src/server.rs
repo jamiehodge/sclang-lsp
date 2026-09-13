@@ -73,6 +73,14 @@ impl Server {
         connection: &Connection,
         scan_rx: Receiver<Scan>,
     ) -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+        // The scan arrives once, and then its sender is dropped. A disconnected
+        // channel is *always* ready, so leaving that branch in the select
+        // afterwards makes `recv` return `Err` immediately, every time, and
+        // the loop spins at 100% CPU for the life of the process. Swapping in
+        // a channel that is never ready is what stops it.
+        let never = crossbeam_channel::never::<Scan>();
+        let mut scan_rx = Some(scan_rx);
+
         loop {
             crossbeam_channel::select! {
                 recv(connection.receiver) -> msg => {
@@ -90,7 +98,10 @@ impl Server {
                         Message::Response(_) => {}
                     }
                 }
-                recv(scan_rx) -> scan => {
+                recv(scan_rx.as_ref().unwrap_or(&never)) -> scan => {
+                    // Whether the scan arrived or the thread went away, there
+                    // is nothing more coming from here.
+                    scan_rx = None;
                     if let Ok(scan) = scan {
                         self.install(scan);
                     }

@@ -66,7 +66,14 @@ async function start(context: vscode.ExtensionContext): Promise<void> {
     };
 
     const clientOptions: LanguageClientOptions = {
-        documentSelector: [{ scheme: 'file', language: 'supercollider' }],
+        documentSelector: [
+            { scheme: 'file', language: 'supercollider' },
+            // A buffer that has never been saved is `untitled`, not `file`.
+            // Leaving it out means the client never attaches to a scratch
+            // buffer at all — no diagnostics, no completion, nothing — which
+            // is exactly where SuperCollider tends to get written.
+            { scheme: 'untitled', language: 'supercollider' },
+        ],
         initializationOptions: initializationOptions(),
     };
 

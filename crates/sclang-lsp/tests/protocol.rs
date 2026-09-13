@@ -657,3 +657,86 @@ fn chain(range: &SelectionRange) -> Vec<Range> {
     }
     out
 }
+
+/// A buffer that has never been saved has no path — the editor gives it a URI
+/// like `untitled:Untitled-1`. Everything has to keep working on one, because
+/// that is where SuperCollider tends to get written.
+#[test]
+fn an_unsaved_buffer_is_a_document_like_any_other() {
+    let mut h = Harness::start("untitled", &mini_library());
+
+    let uri = Url::parse("untitled:Untitled-1").unwrap();
+    h.send_notification(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": {
+                "uri": uri, "languageId": "supercollider", "version": 1,
+                "text": "Scratch : Object {\n\tgo { ^SinOsc.ar(440) }\n}\n",
+            }
+        }),
+    );
+
+    // Diagnostics arrive for it.
+    let diagnostics = h.await_diagnostics(&uri);
+    assert!(
+        diagnostics.diagnostics.is_empty(),
+        "unexpected errors: {:?}",
+        diagnostics.diagnostics
+    );
+
+    // Completion works inside it.
+    let response: Option<CompletionResponse> = h.request_at("textDocument/completion", &uri, 1, 14);
+    let items = match response {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(
+        items.iter().any(|i| i.label == "ar"),
+        "expected `ar` from an unsaved buffer"
+    );
+
+    // And a class defined only here resolves back to it, which is the part
+    // that fails when a synthetic path cannot be turned back into a URI.
+    let scratch = h.open("User.scd", "Scratch.go");
+    let definition: Option<GotoDefinitionResponse> =
+        h.request_at("textDocument/definition", &scratch, 0, 2);
+
+    match definition {
+        Some(GotoDefinitionResponse::Scalar(location)) => assert_eq!(location.uri, uri),
+        other => panic!("expected the unsaved buffer, got {other:?}"),
+    }
+}
+
+/// A class in an unsaved buffer must be visible to the rest of the workspace,
+/// or a file being written is invisible until it is saved.
+#[test]
+fn an_unsaved_buffer_contributes_to_completion_elsewhere() {
+    let mut h = Harness::start("untitled-index", &mini_library());
+
+    let uri = Url::parse("untitled:Untitled-2").unwrap();
+    h.send_notification(
+        "textDocument/didOpen",
+        serde_json::json!({
+            "textDocument": {
+                "uri": uri, "languageId": "supercollider", "version": 1,
+                "text": "Wobbler : Object {\n\t*wobble { ^1 }\n}\n",
+            }
+        }),
+    );
+    h.await_diagnostics(&uri);
+
+    let other = h.open("Other.scd", "Wobb");
+    let response: Option<CompletionResponse> =
+        h.request_at("textDocument/completion", &other, 0, 4);
+    let items = match response {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+
+    assert!(
+        items.iter().any(|i| i.label == "Wobbler"),
+        "a class in an unsaved buffer should still be offered"
+    );
+}

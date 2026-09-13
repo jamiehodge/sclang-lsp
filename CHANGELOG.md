@@ -3,6 +3,24 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## [0.3.1] — 2026-09-13
+
+### Fixed
+
+- **An idle server no longer burns a CPU core.** The event loop selected over
+  the channel carrying the class library scan, and once that scan arrived its
+  sender was dropped — leaving a *disconnected* channel in the select. A
+  disconnected channel is always ready, so the loop spun at 100% CPU for the
+  life of the process, from the moment indexing finished. Every request still
+  answered correctly, which is why nothing noticed. Present since 0.1.0.
+
+- **Unsaved buffers work.** The client attached only to the `file` scheme, so a
+  buffer that had never been saved — `untitled`, and where SuperCollider tends
+  to actually get written — got no diagnostics, no completion and no hover at
+  all. Underneath that, a synthetic path could not be turned back into a URI,
+  so goto-definition and find-references would have skipped unsaved buffers
+  even once the client attached.
+
 ## [0.3.0] — 2026-09-13
 
 The server and the VS Code extension share a version number from here on. A
@@ -69,6 +87,7 @@ First release.
   `sc_lexer`, symbol-for-symbol against the compiled class library, and
   selector-for-selector against a patched sclang's parse dump.
 
+[0.3.1]: https://github.com/jamiehodge/sclang-lsp/releases/tag/v0.3.1
 [0.3.0]: https://github.com/jamiehodge/sclang-lsp/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jamiehodge/sclang-lsp/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jamiehodge/sclang-lsp/releases/tag/v0.1.0

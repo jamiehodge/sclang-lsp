@@ -5,7 +5,7 @@
 //! differ from the one on disk — so an open document always wins over the
 //! file.
 
-use crate::documents::{Document, DocumentStore};
+use crate::documents::{path_to_uri, Document, DocumentStore};
 use crate::line_index::{LineIndex, PositionEncoding};
 use lsp_types::{Location, Url};
 use std::collections::HashMap;
@@ -43,7 +43,7 @@ impl<'a> Resolver<'a> {
 
     /// A byte range in a file, open or not.
     pub fn at(&self, file: &Path, range: std::ops::Range<u32>) -> Option<Location> {
-        let uri = Url::from_file_path(file).ok()?;
+        let uri = path_to_uri(file)?;
 
         if let Some(doc) = self.docs.get(&uri) {
             return Some(Location {
@@ -73,7 +73,7 @@ impl<'a> Resolver<'a> {
         let mut out = Vec::new();
 
         for (file, range) in items {
-            let Ok(uri) = Url::from_file_path(file) else {
+            let Some(uri) = path_to_uri(file) else {
                 continue;
             };
 

@@ -232,14 +232,14 @@ dependencies = [
 
 [[package]]
 name = "sclang-index"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "sclang-syntax",
 ]
 
 [[package]]
 name = "sclang-lsp"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "crossbeam-channel",
  "lsp-server",
@@ -252,7 +252,7 @@ dependencies = [
 
 [[package]]
 name = "sclang-syntax"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "serde"
