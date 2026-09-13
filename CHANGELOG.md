@@ -36,6 +36,21 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
   renaming something on line 100 leaves every token from line 101 on
   byte-identical.
 
+### Changed
+
+- **The VS Code extension has no TextMate grammar.** Colour comes from the
+  server alone. The grammar could only guess from shape — every lowercase word
+  a variable, every capitalised one a class — and the semantic tokens were
+  already overriding it nearly everywhere.
+
+  Two consequences, both the trade rather than an oversight. A file is
+  uncoloured until the server answers, where the grammar used to paint first.
+  And VS Code's bracket matching took its string- and comment-awareness from
+  TextMate tokens, which semantic tokens do not feed, so `"("` may now pair
+  with a later `)`. Evaluation is unaffected: <kbd>⌘⏎</kbd> asks the server for
+  the enclosing block through `textDocument/selectionRange`, which reads the
+  parse tree and has never counted parentheses.
+
 ## [0.6.2] — 2026-09-13
 
 ### Fixed

@@ -2,8 +2,8 @@
 //
 // No editor API, so the rule can be tested directly. The chain itself comes
 // from the language server, which is what makes this sound: the parentheses in
-// it are the ones the grammar saw, so `"("`, `$(`, `'('` and `// (` are text
-// rather than structure.
+// it are the ones sclang's own grammar saw, so `"("`, `$(`, `'('` and `// (`
+// are text rather than structure.
 
 /** One step of a selection-range chain, innermost first. */
 export interface Step {

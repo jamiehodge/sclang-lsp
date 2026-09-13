@@ -148,12 +148,22 @@ order, with a deliberate syntax error at the end for the diagnostics.
 
 GPL-3.0-or-later, matching the server.
 
-`language-configuration.json` and `syntaxes/supercollider.tmLanguage.json` are
-taken from [`vscode-supercollider`](https://github.com/scztt/vscode-supercollider),
+`language-configuration.json` is taken from
+[`vscode-supercollider`](https://github.com/scztt/vscode-supercollider),
 MIT © 2022 Scott Carver. See [LICENSE-MIT](LICENSE-MIT).
 
-The grammar still does the first pass — it is synchronous, and it paints before
-the server has started. The server's semantic tokens arrive after and refine
-it, which is what tells a selector from a variable and a parameter from a
-local. VS Code layers the two by default; `editor.semanticHighlighting.enabled`
-turns the second one off.
+There is no TextMate grammar. Colour comes from the server's semantic tokens
+alone, so a selector is not a variable that happens to be lowercase and a
+parameter stays a parameter where it is used — distinctions a grammar matching
+on shape cannot make. Two things follow from having no grammar at all, and both
+are the trade rather than an oversight:
+
+- A file is uncoloured until the server answers, and stays uncoloured if the
+  server fails to start. Previously the grammar painted first and the tokens
+  refined it.
+- VS Code's bracket matching and bracket-pair colouring use TextMate tokens to
+  tell a real `(` from one inside a string or a comment, and semantic tokens do
+  not feed them. So `"("` may now pair with a later `)`. Evaluation is
+  unaffected — <kbd>⌘⏎</kbd> asks the server for the enclosing block through
+  `textDocument/selectionRange`, which reads the parse tree and has never
+  counted parentheses.

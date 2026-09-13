@@ -97,6 +97,14 @@ a client without one gets highlighting it otherwise has no source for. That is
 also why the capability is advertised unconditionally rather than per editor:
 a client that does not consume semantic tokens never sends the request.
 
+`editors/vscode` is now the second kind. Its TextMate grammar is gone, and the
+server is the only thing colouring SuperCollider there. What that gives up is
+worth stating: a file has no colour until the server answers, and VS Code's
+bracket matching loses the string- and comment-awareness it took from TextMate
+tokens, because semantic tokens do not feed it. Evaluation keeps its own
+awareness — the block picker reads `textDocument/selectionRange` rather than
+counting parentheses, which is the same reason it was built that way.
+
 ### Deltas
 
 `full/delta` needs one piece of mutable state on the request path: the array

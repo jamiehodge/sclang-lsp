@@ -52,13 +52,6 @@
         "configuration": "./language-configuration.json"
       }
     ],
-    "grammars": [
-      {
-        "language": "supercollider",
-        "scopeName": "source.supercollider",
-        "path": "./syntaxes/supercollider.tmLanguage.json"
-      }
-    ],
     "commands": [
       {
         "command": "sclang-lsp.evaluate",
