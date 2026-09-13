@@ -97,6 +97,21 @@ a client without one gets highlighting it otherwise has no source for. That is
 also why the capability is advertised unconditionally rather than per editor:
 a client that does not consume semantic tokens never sends the request.
 
+### Deltas
+
+`full/delta` needs one piece of mutable state on the request path: the array
+last sent for each open document, and the result id it went out under. Nothing
+invalidates it on edit — diffing *against* the last response is the point — so
+the only lifecycle event is `didClose`.
+
+The diff is one edit: keep the longest common prefix and suffix, replace the
+middle. A finer diff would not pay, because the relative encoding has already
+localised the change. Every token's position is relative to the token before
+it and the first on a line carries an absolute column, so renaming something on
+line 100 leaves every token from line 101 on byte-identical. Rebuilding the
+tokens was never the cost; re-sending several hundred kilobytes of JSON per
+keystroke was.
+
 ## Documents
 
 The server owns text: real incremental edits, version tracking, and the buffer

@@ -21,19 +21,22 @@
 //! for. The only tokens deliberately left out are punctuation, which no theme
 //! colours anyway.
 //!
-//! No `full/delta` support. It would need the server to remember the exact
-//! array it last sent for each document, keyed by a result id, so it could
-//! hand back edits against it — real mutable state on the request path, to
-//! save re-sending a payload that takes well under a millisecond to rebuild.
+//! [`Cache`] is what makes `full/delta` possible: the array last sent for each
+//! open document, labelled with the result id the client was given. Rebuilding
+//! the tokens costs well under a millisecond either way — what a delta saves is
+//! the *transfer*, and on a class-library file that is a few hundred kilobytes
+//! of JSON on every keystroke rather than a handful of integers.
 
 use crate::documents::Document;
 use crate::line_index::PositionEncoding;
 use crate::scope::{declared_in, is_scope, Local, LocalKind, PSEUDO_VARIABLES};
 use lsp_types::{
     Range, SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokens,
-    SemanticTokensLegend,
+    SemanticTokensDelta, SemanticTokensEdit, SemanticTokensFullDeltaResult, SemanticTokensLegend,
+    Url,
 };
 use sclang_syntax::{Child, SyntaxKind, SyntaxNode, Token};
+use std::collections::HashMap;
 
 /// The token types this server emits, in the order the legend declares them.
 ///
@@ -97,7 +100,10 @@ pub fn legend() -> SemanticTokensLegend {
 }
 
 /// Every token in the document.
-pub fn semantic_tokens(doc: &Document, enc: PositionEncoding) -> SemanticTokens {
+///
+/// Bare tokens, with no result id: labelling a response is [`Cache`]'s job,
+/// because only it knows whether the array can be diffed against later.
+pub fn semantic_tokens(doc: &Document, enc: PositionEncoding) -> Vec<SemanticToken> {
     tokens_in(doc, 0, doc.text.len() as u32, enc)
 }
 
@@ -106,13 +112,13 @@ pub fn semantic_tokens_range(
     doc: &Document,
     range: Range,
     enc: PositionEncoding,
-) -> SemanticTokens {
+) -> Vec<SemanticToken> {
     let from = doc.line_index.offset(&doc.text, range.start, enc);
     let to = doc.line_index.offset(&doc.text, range.end, enc);
     tokens_in(doc, from, to, enc)
 }
 
-fn tokens_in(doc: &Document, from: u32, to: u32, enc: PositionEncoding) -> SemanticTokens {
+fn tokens_in(doc: &Document, from: u32, to: u32, enc: PositionEncoding) -> Vec<SemanticToken> {
     let mut walker = Walker {
         source: &doc.text,
         from,
@@ -121,12 +127,129 @@ fn tokens_in(doc: &Document, from: u32, to: u32, enc: PositionEncoding) -> Seman
         out: Vec::new(),
     };
     walker.walk(&doc.parse().root, None);
-    SemanticTokens {
-        // No result id: without `full/delta` the client has nothing to send
-        // one back for.
-        result_id: None,
-        data: encode(&walker.out, doc, enc),
+    encode(&walker.out, doc, enc)
+}
+
+/// What was last sent for each open document, and under which result id.
+///
+/// This is the whole of `full/delta`: a client hands back the id it was last
+/// given, and gets the edits since rather than the array again. Nothing here
+/// is invalidated by an edit — being able to diff *against* the last response
+/// is the point — so the only lifecycle event that matters is closing a
+/// document, which is [`Cache::forget`].
+#[derive(Debug, Default)]
+pub struct Cache {
+    sent: HashMap<Url, Sent>,
+    /// Result ids only have to be unique per document, but a single counter
+    /// is simpler and makes them unique across the session, which is easier
+    /// to follow in a protocol trace.
+    issued: u64,
+}
+
+#[derive(Debug)]
+struct Sent {
+    result_id: String,
+    tokens: Vec<SemanticToken>,
+}
+
+impl Cache {
+    /// A full response, labelled so the next request can ask for a delta.
+    pub fn full(&mut self, uri: &Url, tokens: Vec<SemanticToken>) -> SemanticTokens {
+        let result_id = self.remember(uri, tokens.clone());
+        SemanticTokens {
+            result_id: Some(result_id),
+            data: tokens,
+        }
     }
+
+    /// The edits since `previous_result_id`, or the whole array when that is
+    /// not what this document was last sent.
+    ///
+    /// A stale id is not an error: the client may have been talking to a
+    /// server that has since restarted, or to a document that was closed and
+    /// reopened. The protocol's answer to both is a full response.
+    pub fn delta(
+        &mut self,
+        uri: &Url,
+        previous_result_id: &str,
+        tokens: Vec<SemanticToken>,
+    ) -> SemanticTokensFullDeltaResult {
+        let against = match self.sent.get(uri) {
+            Some(sent) if sent.result_id == previous_result_id => {
+                Some(edits(&sent.tokens, &tokens))
+            }
+            _ => None,
+        };
+
+        match against {
+            Some(edits) => {
+                let result_id = self.remember(uri, tokens);
+                SemanticTokensDelta {
+                    result_id: Some(result_id),
+                    edits,
+                }
+                .into()
+            }
+            None => self.full(uri, tokens).into(),
+        }
+    }
+
+    /// Drop what a closed document was holding. A range response is never
+    /// remembered, so there is nothing else to clear.
+    pub fn forget(&mut self, uri: &Url) {
+        self.sent.remove(uri);
+    }
+
+    fn remember(&mut self, uri: &Url, tokens: Vec<SemanticToken>) -> String {
+        self.issued += 1;
+        let result_id = self.issued.to_string();
+        self.sent.insert(
+            uri.clone(),
+            Sent {
+                result_id: result_id.clone(),
+                tokens,
+            },
+        );
+        result_id
+    }
+}
+
+/// The edits that turn one token array into another.
+///
+/// One edit: keep the longest common prefix and suffix, replace everything
+/// between. A finer diff is possible and not worth it, because the relative
+/// encoding has already localised the change — every token's position is
+/// relative to the token before it, so an edit on one line leaves every token
+/// on later lines byte-identical, and the middle stays small for the edits
+/// people actually make.
+fn edits(previous: &[SemanticToken], current: &[SemanticToken]) -> Vec<SemanticTokensEdit> {
+    let prefix = previous
+        .iter()
+        .zip(current)
+        .take_while(|(before, after)| before == after)
+        .count();
+
+    if prefix == previous.len() && prefix == current.len() {
+        return Vec::new();
+    }
+
+    // The suffix may not reach back into the prefix, or the same tokens would
+    // be both kept and deleted.
+    let available = previous.len().min(current.len()) - prefix;
+    let suffix = previous
+        .iter()
+        .rev()
+        .zip(current.iter().rev())
+        .take(available)
+        .take_while(|(before, after)| before == after)
+        .count();
+
+    vec![SemanticTokensEdit {
+        // The protocol indexes the flat array of integers, five per token.
+        start: (prefix * 5) as u32,
+        delete_count: ((previous.len() - prefix - suffix) * 5) as u32,
+        data: Some(current[prefix..current.len() - suffix].to_vec()),
+    }]
 }
 
 /// One classified span of source, before delta encoding.
@@ -530,13 +653,12 @@ mod tests {
     /// Undo the delta encoding, which is the only way to assert on something
     /// a reader can check by eye — and it exercises the encoder rather than
     /// trusting it.
-    fn decode(source: &str, tokens: &SemanticTokens) -> Vec<Decoded> {
+    fn decode(source: &str, tokens: &[SemanticToken]) -> Vec<Decoded> {
         let index = crate::line_index::LineIndex::new(source);
         let legend = legend();
         let (mut line, mut character) = (0, 0);
 
         tokens
-            .data
             .iter()
             .map(|t| {
                 line += t.delta_line;
@@ -862,7 +984,7 @@ mod tests {
         let source = "// lead\nFoo : Bar {\n\tclassvar <all;\n\t*new { |n = 4|\n\t\t^super.new.init(n)\n\t}\n\tinit { |n| all = all ++ [n]; ^this }\n}\n";
         let doc = Document::new(source.to_string(), 1);
         let tokens = semantic_tokens(&doc, PositionEncoding::Utf16);
-        for token in &tokens.data {
+        for token in &tokens {
             if token.delta_line == 0 {
                 // Two tokens on one line may touch but never overlap or
                 // reverse; `delta_start` is unsigned, so a reversal would
@@ -885,9 +1007,9 @@ mod tests {
         let source = "// 🎛\nFoo { }";
         let doc = Document::new(source.to_string(), 1);
         let utf16 = semantic_tokens(&doc, PositionEncoding::Utf16);
-        assert_eq!(utf16.data[0].length, 5);
+        assert_eq!(utf16[0].length, 5);
         let utf8 = semantic_tokens(&doc, PositionEncoding::Utf8);
-        assert_eq!(utf8.data[0].length, 7);
+        assert_eq!(utf8[0].length, 7);
     }
 
     #[test]
@@ -949,7 +1071,7 @@ mod tests {
             let (mut line, mut character) = (0, 0);
             let mut previous_end = 0;
 
-            for (i, token) in tokens.data.iter().enumerate() {
+            for (i, token) in tokens.iter().enumerate() {
                 line += token.delta_line;
                 character = if token.delta_line == 0 {
                     character + token.delta_start
@@ -1043,6 +1165,161 @@ mod tests {
         for source in classes {
             well_formed(source, sclang_syntax::Mode::ClassFile);
         }
+    }
+
+    /// The tokens of a script, as the cache would be handed them.
+    fn tokens_of(source: &str) -> Vec<SemanticToken> {
+        let doc = Document::with_mode(source.to_string(), 1, sclang_syntax::Mode::Script);
+        semantic_tokens(&doc, PositionEncoding::Utf16)
+    }
+
+    fn five(token: &SemanticToken) -> [u32; 5] {
+        [
+            token.delta_line,
+            token.delta_start,
+            token.length,
+            token.token_type,
+            token.token_modifiers_bitset,
+        ]
+    }
+
+    /// Apply edits the way a client does: on the flat array of integers, which
+    /// is the only place an off-by-five shows up.
+    fn apply(previous: &[SemanticToken], edits: &[SemanticTokensEdit]) -> Vec<SemanticToken> {
+        let mut flat: Vec<u32> = previous.iter().flat_map(five).collect();
+        // Each edit indexes the array as the ones before it left it, so going
+        // backwards keeps every index valid. Only ever one is produced here,
+        // but a helper that is wrong about this would hide the day that
+        // changes.
+        for edit in edits.iter().rev() {
+            let start = edit.start as usize;
+            let end = start + edit.delete_count as usize;
+            let data: Vec<u32> = edit.data.iter().flatten().flat_map(five).collect();
+            flat.splice(start..end, data);
+        }
+        // The flat array is always a whole number of tokens; `as_chunks` says
+        // so in the type rather than leaving a remainder to ignore.
+        flat.as_chunks::<5>()
+            .0
+            .iter()
+            .map(|c| SemanticToken {
+                delta_line: c[0],
+                delta_start: c[1],
+                length: c[2],
+                token_type: c[3],
+                token_modifiers_bitset: c[4],
+            })
+            .collect()
+    }
+
+    #[test]
+    fn edits_reconstruct_the_new_array() {
+        // The property the whole feature rests on. A client that applies
+        // these to what it has must end up with what a full request would
+        // have given it — anything else is colour that silently disagrees
+        // with the buffer until something forces a refresh.
+        let pairs = [
+            ("Foo { }", "Foo { }"),
+            ("", "Foo { }"),
+            ("Foo { }", ""),
+            ("", ""),
+            ("Foo { }", "Fooo { }"),
+            ("Foo { }", "Bar { }"),
+            ("1 + 2", "1 + 2 + 3"),
+            ("a.foo; b.bar", "a.foo; c.baz; b.bar"),
+            ("// one\n1", "1"),
+            ("{ |a| a }", "{ |a, b| a + b }"),
+            ("x\ny\nz", "x\n\ny\nz"),
+            ("\"one\ntwo\"", "\"one\ntwo\nthree\""),
+        ];
+
+        for (before, after) in pairs {
+            let previous = tokens_of(before);
+            let current = tokens_of(after);
+            let edits = edits(&previous, &current);
+            assert_eq!(
+                apply(&previous, &edits),
+                current,
+                "{before:?} -> {after:?} did not reconstruct"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unchanged_document_produces_no_edits() {
+        let tokens = tokens_of("Foo { }");
+        assert!(edits(&tokens, &tokens).is_empty());
+    }
+
+    #[test]
+    fn an_edit_in_the_middle_sends_only_what_changed() {
+        // The point of the feature, and the one property a correct-but-whole
+        // array replacement would still pass every other test here.
+        //
+        // It works because the encoding is relative: the first token on a
+        // line carries an absolute column, so renaming something on line 100
+        // leaves every token from line 101 on byte-identical.
+        let before: String = (0..200).map(|i| format!("var x{i} = {i};\n")).collect();
+        let after = before.replace("var x100 = 100;", "var xx100 = 100;");
+
+        let previous = tokens_of(&before);
+        let current = tokens_of(&after);
+        assert!(previous.len() > 500, "{} tokens", previous.len());
+
+        let edits = edits(&previous, &current);
+        assert_eq!(edits.len(), 1);
+        let sent = edits[0].data.as_ref().unwrap();
+        assert!(
+            sent.len() <= 3,
+            "a one-line rename resent {} of {} tokens",
+            sent.len(),
+            current.len()
+        );
+        assert_eq!(apply(&previous, &edits), current);
+    }
+
+    #[test]
+    fn a_delta_is_measured_against_the_id_the_client_was_given() {
+        let uri = Url::parse("file:///delta.scd").unwrap();
+        let mut cache = Cache::default();
+
+        let first = cache.full(&uri, tokens_of("Foo { }"));
+        let first_id = first
+            .result_id
+            .clone()
+            .expect("a full response is labelled");
+
+        let second = cache.delta(&uri, &first_id, tokens_of("Bar { }"));
+        let SemanticTokensFullDeltaResult::TokensDelta(delta) = second else {
+            panic!("expected edits against a live id");
+        };
+        assert_eq!(apply(&first.data, &delta.edits), tokens_of("Bar { }"));
+
+        // Every response gets its own id, so the client cannot diff twice
+        // against the same base.
+        let second_id = delta.result_id.expect("a delta is labelled too");
+        assert_ne!(second_id, first_id);
+
+        // The id that has now been superseded gets the whole array rather
+        // than an error: the client may have been talking to a server that
+        // has since restarted.
+        let stale = cache.delta(&uri, &first_id, tokens_of("Bar { }"));
+        assert!(matches!(stale, SemanticTokensFullDeltaResult::Tokens(_)));
+    }
+
+    #[test]
+    fn closing_a_document_forgets_what_it_was_sent() {
+        let uri = Url::parse("file:///closed.scd").unwrap();
+        let mut cache = Cache::default();
+        let id = cache.full(&uri, tokens_of("Foo { }")).result_id.unwrap();
+
+        cache.forget(&uri);
+
+        let after = cache.delta(&uri, &id, tokens_of("Foo { }"));
+        assert!(
+            matches!(after, SemanticTokensFullDeltaResult::Tokens(_)),
+            "a reopened document has nothing to diff against"
+        );
     }
 
     #[test]

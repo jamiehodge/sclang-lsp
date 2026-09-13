@@ -28,9 +28,13 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
   runs the same checks over a real class library and the help-file corpus,
   where it clears 5,465 files and 546,358 tokens.
 
-  No `full/delta`. It needs the server to remember the array it last sent for
-  each document, to save re-sending a payload that takes well under a
-  millisecond to rebuild.
+  `full`, `range` and `full/delta`. A delta keeps one thing on the request
+  path — the array last sent for each open document, and the id it went out
+  under — and pays for it in transfer: a keystroke in a long class file sends
+  a handful of integers instead of a few hundred kilobytes of JSON. The diff is
+  one edit, because the relative encoding has already localised the change:
+  renaming something on line 100 leaves every token from line 101 on
+  byte-identical.
 
 ## [0.6.2] — 2026-09-13
 

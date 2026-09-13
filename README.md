@@ -27,7 +27,7 @@ installed at all. It never starts sclang and never talks to one.
 | **Find references** | Exact for a local or a class name; textual for a selector, since dispatch is dynamic |
 | **Rename** | Function locals and class names — everything whose uses can be enumerated completely |
 | **Inlay hints** | The parameter each positional argument fills |
-| **Semantic tokens** | Colour from the parse tree: a selector is a method, a name declared as `arg` stays a parameter wherever it appears |
+| **Semantic tokens** | Colour from the parse tree: a selector is a method, a name declared as `arg` stays a parameter wherever it appears. `full`, `range` and `full/delta` |
 | **Symbols** | Classes with their methods nested, and across the workspace |
 | **Selection ranges** | Expand-selection, following the real syntax |
 
@@ -166,8 +166,7 @@ program.
 nothing static can enumerate them. This is the one real capability given up by
 never contacting sclang, and it is worth the exchange.
 
-No SCDoc rendering, no document highlight, and no `semanticTokens/full/delta`
-yet.
+No SCDoc rendering and no document highlight yet.
 
 ## Why you can trust it
 

@@ -55,11 +55,11 @@ fn check(source: &str, mode: Mode) -> Result<usize, String> {
 
     for enc in [PositionEncoding::Utf8, PositionEncoding::Utf16] {
         let tokens = semantic_tokens(&doc, enc);
-        counted = tokens.data.len();
+        counted = tokens.len();
         let (mut line, mut character) = (0, 0);
         let mut previous_end = 0;
 
-        for (i, token) in tokens.data.iter().enumerate() {
+        for (i, token) in tokens.iter().enumerate() {
             line += token.delta_line;
             character = if token.delta_line == 0 {
                 character + token.delta_start

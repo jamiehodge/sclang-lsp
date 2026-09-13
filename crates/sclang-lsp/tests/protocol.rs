@@ -493,6 +493,135 @@ fn semantic_tokens_can_be_asked_for_one_range() {
     );
 }
 
+#[test]
+fn a_delta_carries_only_what_changed() {
+    let mut h = Harness::start("semtok-delta", &mini_library());
+    let uri = h.open("Test.scd", "SinOsc.ar(440);\nSaw.ar(220);\n");
+    let _ = h.await_diagnostics(&uri);
+
+    // Advertised, or no client will ever ask for one.
+    let full = match &h.capabilities.semantic_tokens_provider {
+        Some(SemanticTokensServerCapabilities::SemanticTokensOptions(options)) => {
+            options.full.clone()
+        }
+        other => panic!("semantic tokens were not advertised: {other:?}"),
+    };
+    assert!(
+        matches!(
+            full,
+            Some(SemanticTokensFullOptions::Delta { delta: Some(true) })
+        ),
+        "{full:?}"
+    );
+
+    let first: SemanticTokens = h.request(
+        "textDocument/semanticTokens/full",
+        serde_json::json!({ "textDocument": { "uri": uri } }),
+    );
+    let previous = first
+        .result_id
+        .clone()
+        .expect("a full response has to be labelled or nothing can diff against it");
+
+    // Rename the class on the second line. The first line is untouched, and
+    // the relative encoding means its tokens are byte-identical after.
+    h.change(
+        &uri,
+        2,
+        Range::new(Position::new(1, 0), Position::new(1, 3)),
+        "SinOsc",
+    );
+
+    let response: SemanticTokensFullDeltaResult = h.request(
+        "textDocument/semanticTokens/full/delta",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "previousResultId": previous,
+        }),
+    );
+    let SemanticTokensFullDeltaResult::TokensDelta(delta) = response else {
+        panic!("expected edits against a live result id: {response:?}");
+    };
+
+    // What the client is left holding must be what a full request would have
+    // given it. Anything else is colour quietly disagreeing with the buffer.
+    let rebuilt = apply_edits(&first.data, &delta.edits);
+    let fresh: SemanticTokens = h.request(
+        "textDocument/semanticTokens/full",
+        serde_json::json!({ "textDocument": { "uri": uri } }),
+    );
+    assert_eq!(rebuilt, fresh.data);
+
+    let sent: usize = delta
+        .edits
+        .iter()
+        .map(|e| e.data.as_ref().map_or(0, |d| d.len()))
+        .sum();
+    assert!(
+        sent < fresh.data.len(),
+        "resent {sent} of {} tokens",
+        fresh.data.len()
+    );
+}
+
+#[test]
+fn a_stale_result_id_gets_the_whole_array() {
+    let mut h = Harness::start("semtok-stale", &mini_library());
+    let uri = h.open("Test.scd", "SinOsc.ar(440);\n");
+    let _ = h.await_diagnostics(&uri);
+
+    // An id from a server that has since restarted. The protocol's answer is
+    // a full response, not an error — the client cannot tell the difference
+    // and must not be left with no colour.
+    let response: SemanticTokensFullDeltaResult = h.request(
+        "textDocument/semanticTokens/full/delta",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "previousResultId": "from-a-previous-life",
+        }),
+    );
+    let SemanticTokensFullDeltaResult::Tokens(tokens) = response else {
+        panic!("expected a full response: {response:?}");
+    };
+    assert!(!tokens.data.is_empty());
+    assert!(tokens.result_id.is_some());
+}
+
+/// Apply edits to a token array the way a client does, on the flat array of
+/// integers the protocol actually indexes.
+fn apply_edits(previous: &[SemanticToken], edits: &[SemanticTokensEdit]) -> Vec<SemanticToken> {
+    let five = |t: &SemanticToken| {
+        [
+            t.delta_line,
+            t.delta_start,
+            t.length,
+            t.token_type,
+            t.token_modifiers_bitset,
+        ]
+    };
+    let mut flat: Vec<u32> = previous.iter().flat_map(five).collect();
+    // Backwards, so each edit's indices still refer to the array it was
+    // measured against.
+    for edit in edits.iter().rev() {
+        let start = edit.start as usize;
+        let end = start + edit.delete_count as usize;
+        let data: Vec<u32> = edit.data.iter().flatten().flat_map(five).collect();
+        flat.splice(start..end, data);
+    }
+    // The flat array is always a whole number of tokens.
+    flat.as_chunks::<5>()
+        .0
+        .iter()
+        .map(|c| SemanticToken {
+            delta_line: c[0],
+            delta_start: c[1],
+            length: c[2],
+            token_type: c[3],
+            token_modifiers_bitset: c[4],
+        })
+        .collect()
+}
+
 /// Undo the delta encoding the way a client does: against the legend the
 /// server advertised, not against anything this crate knows privately.
 fn decode_tokens<'a>(h: &'a Harness, tokens: &SemanticTokens) -> Vec<(u32, u32, u32, &'a str)> {

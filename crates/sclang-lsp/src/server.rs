@@ -25,6 +25,9 @@ pub struct Server {
     docs: DocumentStore,
     index: SymbolIndex,
     references: ReferenceIndex,
+    /// What semantic tokens each open document was last sent, so a client can
+    /// be told what changed rather than sent the whole array again.
+    tokens: features::semantic_tokens::Cache,
     enc: PositionEncoding,
     sender: Sender<Message>,
 }
@@ -62,6 +65,7 @@ impl Server {
             docs: DocumentStore::default(),
             index: SymbolIndex::default(),
             references: ReferenceIndex::default(),
+            tokens: Default::default(),
             enc,
             sender: connection.sender.clone(),
         };
@@ -237,15 +241,33 @@ impl Server {
                 }),
             request::SemanticTokensFullRequest::METHOD => self
                 .handle::<request::SemanticTokensFullRequest>(req, |s, p| {
-                    let doc = s.docs.get(&p.text_document.uri)?;
-                    Some(features::semantic_tokens::semantic_tokens(doc, s.enc).into())
+                    let uri = p.text_document.uri;
+                    let doc = s.docs.get(&uri)?;
+                    let tokens = features::semantic_tokens::semantic_tokens(doc, s.enc);
+                    Some(s.tokens.full(&uri, tokens).into())
                 }),
+            request::SemanticTokensFullDeltaRequest::METHOD => {
+                self.handle::<request::SemanticTokensFullDeltaRequest>(req, |s, p| {
+                    let uri = p.text_document.uri;
+                    let doc = s.docs.get(&uri)?;
+                    let tokens = features::semantic_tokens::semantic_tokens(doc, s.enc);
+                    Some(s.tokens.delta(&uri, &p.previous_result_id, tokens))
+                })
+            }
             request::SemanticTokensRangeRequest::METHOD => self
                 .handle::<request::SemanticTokensRangeRequest>(req, |s, p| {
                     let doc = s.docs.get(&p.text_document.uri)?;
+                    let data =
+                        features::semantic_tokens::semantic_tokens_range(doc, p.range, s.enc);
+                    // No result id. A range covers part of a document, so it
+                    // can never be the thing a later delta is measured
+                    // against, and labelling it would invite exactly that.
                     Some(
-                        features::semantic_tokens::semantic_tokens_range(doc, p.range, s.enc)
-                            .into(),
+                        SemanticTokens {
+                            result_id: None,
+                            data,
+                        }
+                        .into(),
                     )
                 }),
             request::SelectionRangeRequest::METHOD => self
@@ -378,6 +400,7 @@ impl Server {
                 if let Some(p) = extract::<notification::DidCloseTextDocument>(note) {
                     let uri = p.text_document.uri;
                     self.docs.close(&uri);
+                    self.tokens.forget(&uri);
                     // Fall back to what is on disk, so closing a buffer does
                     // not remove its class from the index.
                     let path = uri_to_path(&uri);
@@ -607,7 +630,11 @@ pub fn capabilities(enc: PositionEncoding) -> ServerCapabilities {
         semantic_tokens_provider: Some(
             SemanticTokensOptions {
                 legend: features::semantic_tokens::legend(),
-                full: Some(SemanticTokensFullOptions::Bool(true)),
+                // Deltas, because the payload is the cost here rather than
+                // the computation: a long class file is a few hundred
+                // kilobytes of JSON, and a keystroke changes a few tokens of
+                // it.
+                full: Some(SemanticTokensFullOptions::Delta { delta: Some(true) }),
                 // A client painting a long class-library file asks for the
                 // viewport before it asks for the rest.
                 range: Some(true),
