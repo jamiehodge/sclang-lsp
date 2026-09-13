@@ -1,160 +1,60 @@
 # sclang-lsp
 
-A language server foundation for SuperCollider, derived from sclang's own front end.
+A language server for SuperCollider.
 
-## Why derive rather than reimplement
+Completion that knows the class library. Hover with real signatures and the
+comment above the definition. Goto-definition, find-references, rename,
+document and workspace symbols, inlay hints, and syntax errors as you type.
 
-SuperCollider's compiler front end is the only authority on what the language
-actually is. A hand-written grammar maintained separately will drift, and the
-drift is invisible — it produces trees that parse without error but are wrong.
-(The tree-sitter grammar, for instance, modelled SuperCollider as having C-like
-operator precedence for years. It doesn't: `1 + 2 * 3` is 9, not 7.)
+It reads SuperCollider by parsing it, so it works on code that does not
+compile, while sclang is busy, and on a machine with no SuperCollider
+installed at all. It never starts sclang and never talks to one.
 
-So both halves of this crate come from `lang/LangSource` in the SuperCollider
-source tree:
+## What you get
 
-| This crate | Derived from |
+| | |
 |---|---|
-| `lexer.rs` | `PyrLexer.cpp` — the hand-written scanner |
-| `parser.rs`, `grammar.rs` | `Bison/lang11d` — the bison grammar |
+| **Diagnostics** | Syntax errors, per keystroke |
+| **Completion** | Parameter names inside a call, then names in scope, then class names. Class-side methods after `Foo.`, inherited ones included |
+| **Signature help** | The call being typed, with the current parameter marked. `name:` selects its own parameter rather than its position |
+| **Hover** | Signature, superclass chain, and the comment above the definition. For a local, what kind of binding it is and its default |
+| **Goto-definition** | Exact for a class, a class receiver or a local; every implementor otherwise |
+| **Find references** | Exact for a local or a class name; textual for a selector, since dispatch is dynamic |
+| **Rename** | Function locals and class names — everything whose uses can be enumerated completely |
+| **Inlay hints** | The parameter each positional argument fills |
+| **Symbols** | Classes with their methods nested, and across the workspace |
+| **Selection ranges** | Expand-selection, following the real syntax |
 
-The grammar extraction is mechanical: strip the semantic actions from
-`lang11d` (they are 80% of the file and entirely sclang-internal) and 325 lines
-of pure grammar remain, which bison accepts with zero conflicts.
+Unsaved edits count immediately: a class that exists only in a buffer is
+visible to completion everywhere else.
 
-## Where it deliberately differs
+## Install
 
-sclang's front end exists to compile valid programs. A language server mostly
-sees *invalid* ones, because the user is still typing. Three departures follow
-from that, and each is marked at the site in the source:
+### VS Code
 
-1. **Lossless.** Whitespace and comments are tokens, not skipped. The token
-   stream tiles the input exactly, so it round-trips to the byte. This is what
-   makes formatting and refactoring possible later.
-2. **Error tolerant.** Nothing aborts. Unrecognised input becomes an `Error`
-   token and lexing continues. sclang's parser has no error productions at all
-   — it stops at the first syntax error — which is precisely why it cannot be
-   used directly for editor tooling.
-3. **Ranges.** Every token carries start and end byte offsets. `PyrParseNode`
-   carries only a start line and column.
-
-No runtime dependency on sclang. The derivation happens at development time;
-the resulting server is a standalone binary.
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime design: the process
-topology, why the server owns stdio, and why running code belongs to the editor
-rather than to a language server.
-
-## Scope
-
-This is language intelligence, not a SuperCollider environment. It reads and
-understands code: diagnostics, completion, signature help, inlay hints, hover,
-goto-definition, references, rename, symbols.
-
-**The server never runs anything.** It does not spawn sclang, contact one, or
-need one to exist — which is what lets it answer on a class library that does
-not compile, and on a machine with no SuperCollider installed at all.
-
-Running code is the editor's job. The VS Code extension in
-[`editors/vscode`](editors/vscode) does it in a child process of its own:
-evaluation, a post window, and the class-library compile errors that only
-something holding sclang's output can report. The server is not in that path
-and never learns that sclang exists. In Neovim and Emacs the same role is
-already filled by `scnvim` and `scel`.
-
-Anything else that already contributes the `supercollider` language will
-collide with this, since two clients claiming a language means two servers
-answering every request.
-
-## Status
-
-- [x] Lexer — 35 tests, zero error tokens over the full class library
-- [x] Parser — recursive descent from `lang11d`, with error recovery
-- [x] CST — lossless, round-trips every file in the corpus
-- [x] Differential oracles — token-for-token against sclang's own lexer,
-      symbol-for-symbol against its compiled class library
-- [x] Symbol index — classes, methods, args, accessors, docs
-- [x] LSP server — diagnostics, completion, signature help, inlay hints,
-      hover, goto-definition, references, rename, symbols, selection ranges
-- [x] VS Code extension — the client, plus an sclang for evaluation, a post
-      window and class-library compile errors
-
-## The server
-
-`sclang-lsp` speaks LSP over **stdio**, so it is started by an editor rather
-than run by hand. It answers from parsed source alone: nothing in the crate
-spawns sclang, contacts one, or needs one to exist.
-
-| Request | Behaviour |
-|---|---|
-| `publishDiagnostics` | Parser errors, per keystroke |
-| `completion` | Parameter names inside a call, then names in scope — arguments, `var`s, instance variables — then class names, class-side methods after `Foo.` with inherited ones included, or every selector when the receiver is unknown |
-| `signatureHelp` | The signature of the call being typed, with the parameter under the cursor marked. A `name:` argument selects its own parameter rather than its position |
-| `hover` | Signature, superclass chain, and the comment above the definition; for a local, what kind of binding it is and its default |
-| `definition` | Exact for a class name, a class receiver, or a local binding; every implementor otherwise |
-| `inlayHint` | The parameter each positional argument fills, for calls that resolve exactly |
-| `references` | Exact for a local or a class name; textual for a selector, since dispatch is dynamic |
-| `rename` | Function locals and class names only — see below |
-| `documentSymbol` | Classes with their methods nested |
-| `workspaceSymbol` | Classes and methods across the index |
-| `selectionRange` | The chain of syntactic regions around a position — expand-selection, and the only sound way to find the block an editor should evaluate |
-
-Document sync is incremental, and the buffer always wins over the file on
-disk — a class that exists only in an unsaved edit is immediately visible to
-completion everywhere else.
-
-Positions are negotiated: UTF-8 when the client offers it, UTF-16 otherwise,
-which is the protocol default.
-
-### Running it
+The extension lives in [`editors/vscode`](editors/vscode) and bundles the
+server. It is not on the Marketplace yet, so build the `.vsix`:
 
 ```bash
 cargo build --release
+cd editors/vscode && npm install && npm run package
+code --install-extension sclang-lsp-*.vsix
 ```
 
-Point the editor at `target/release/sclang-lsp` for the `supercollider`
-language. The class library is found automatically in the usual place for the
-platform, along with `Extensions` and `downloaded-quarks`. To override that —
-a non-standard install, or a build tree — pass paths in
-`initializationOptions`, which replaces the guessed locations:
+It adds evaluation and a post window too — see
+[its README](editors/vscode/README.md).
 
-```json
-{ "classLibraryPaths": ["/path/to/SCClassLibrary"] }
-```
+> Disable any other SuperCollider extension first. Two extensions contributing
+> the `supercollider` language means two servers answering every request.
 
-Indexing runs in the background, so `initialize` returns immediately. The
-server sends a `window/logMessage` when the scan completes; on this machine the
-stock class library takes about half a second:
+### Everything else
 
-```
-indexed 611 files: 1751 classes, 14620 methods (2 not valid UTF-8, skipped)
-```
+Download a binary from the [releases page](../../releases), or build one with
+`cargo build --release`. Then point your editor at it for the `supercollider`
+language. The server speaks LSP over stdio and ignores arguments it does not
+recognise, so clients that pass `--stdio` are fine.
 
-Requests after that are well under a millisecond, except completion on an
-unknown receiver, which is capped at 1,000 items and marked `isIncomplete` so
-the client re-queries as the prefix grows.
-
-### In an editor
-
-Because the server speaks stdio, most editors need configuration rather than an
-implementation. That is the payoff from the topology in ARCHITECTURE.md: the
-quark speaks LSP over UDP, which is why Neovim, Helix and Zed were never
-supported by it.
-
-Get a binary from the [releases page](../../releases) or build one with
-`cargo build --release`. Clients that pass a `--stdio` flag are fine; the server
-ignores arguments it does not recognise.
-
-**VS Code.** An extension lives in [`editors/vscode`](editors/vscode). It finds
-the binary and starts it — no configuration needed while developing, since it
-looks for a `cargo build` result in the checkout it ships in. It also owns an
-sclang of its own, for the half of the job the server refuses: `⌘⏎` evaluates
-the selection, the enclosing block or the current line, output goes to a post
-window, and compile errors land in the Problems panel. See its
-[README](editors/vscode/README.md) for the `F5` loop and for packaging a VSIX
-with the server bundled inside.
-
-**Neovim** (0.11 or newer, using the built-in client):
+**Neovim** (0.11 or newer):
 
 ```lua
 vim.filetype.add({ extension = { sc = "supercollider", scd = "supercollider" } })
@@ -167,7 +67,7 @@ vim.lsp.config.sclang_lsp = {
 vim.lsp.enable("sclang_lsp")
 ```
 
-**Emacs**, with eglot (built in since 29). `sclang-mode` comes from
+**Emacs**, with eglot. `sclang-mode` comes from
 [scel](https://github.com/supercollider/scel); any major mode will do:
 
 ```elisp
@@ -192,267 +92,81 @@ comment-token = "//"
 language-servers = ["sclang-lsp"]
 ```
 
-Neither `nvim-lspconfig` nor Helix ships a SuperCollider entry upstream, so
-these are hand-written for now.
-
 Only the VS Code path is exercised here; the three snippets above are offered
 untested, and corrections are welcome.
 
-### Alongside scnvim and scel
+The class library is found automatically, along with `Extensions` and
+`downloaded-quarks`. To point somewhere else — a non-standard install, or a
+build tree — pass paths in `initializationOptions`:
 
-Those already give Neovim and Emacs evaluation and a post window, and no
-language intelligence. This server is the other half and does not compete with
-them: running code is the editor's job, not the language server's, which is why
-there is no evaluation here to collide with theirs.
-
-### What it will not do
-
-No type inference, so `x.foo` offers every class defining `foo` rather than
-guessing which `x` is — and signature help lists every implementor's signature
-for the same reason. Inlay hints and keyword-argument completion go further and
-stay silent unless the receiver is a literal class name: both render as though
-they were in the source, so a guess there would read as a fact. No semantic
-tokens or document highlight yet.
-
-**Rename renames only what it can enumerate completely**: arguments and `var`s
-inside a function body, whose uses cannot leave it, and class names, since only
-class names lex as `ClassName`. It refuses methods, and says why — `.play` is
-dispatched at run time, so nothing distinguishes one class's `play` from
-another's, and rewriting every `.play` in a workspace would break the classes
-that were not meant. It refuses instance variables and classvars too: `var
-<count` generates the methods `count` and `count_`, and subclasses inherit
-both. Find-references has no such restriction, because a wrong row in a list
-costs a glance rather than a working program.
-`~envir` contents cannot be enumerated without a running image and are the one
-real capability given up by never contacting one. No SCDoc rendering either —
-see "Deliberately not done" in ARCHITECTURE.md.
-
-### The test that keeps the layering honest
-
-ARCHITECTURE.md asks for one test above all others: delete sclang, start the
-server, and confirm completion and goto-definition still work. It runs the
-shipped binary over real stdio with an empty `PATH`:
-
-```bash
-cargo test -p sclang-lsp --test no_sclang
+```json
+{ "classLibraryPaths": ["/path/to/SCClassLibrary"] }
 ```
 
-That also covers what in-process tests cannot — that the framing is correct and
-that nothing writes stray output to stdout, the failure that pushed
-`LanguageServer.quark` onto UDP in the first place.
+Indexing runs in the background, so startup is immediate. The stock class
+library takes about half a second, after which requests are well under a
+millisecond.
 
-## Conformance
+## Running code
 
-The lexer is checked against real SuperCollider source in bulk — the class
-library, plus installed Extensions and quarks:
+Not the server's job. It never starts sclang, so nothing it answers can be
+delayed or broken by one.
 
-```
-files              : 682
-tokens             : 805,030
-error tokens       : 0 (0.0000%)
-lossless (tokens)  : ALL FILES
----- parser ----
-files parsed clean : 670 / 680 (98.53%)
-not valid UTF-8    : 2 (excluded)
-classes found      : 2,075
-methods found      : 12,263
-lossless (tree)    : ALL FILES
-```
+Evaluation, a post window and server control belong to the editor, which is
+already managing an sclang for you. The VS Code extension does it in a child
+process of its own, and that is also what lets it report **class-library
+compile errors** — sclang prints those before any image exists, so only
+something holding its output can see them. In Neovim and Emacs, `scnvim` and
+`scel` already fill the same role.
 
-**Every `.sc` class file in the corpus parses.** The 10 remaining failures are
-all `.scd` scripts, and 6 of those have genuinely unbalanced delimiters — files
-sclang rejects too. The rest are example scripts meant to be evaluated block by
-block rather than parsed as a unit.
+## What it does not do
 
-The tree is lossless on *every* file, failures included: error recovery keeps
-the rest of a broken file intact, which is the property that matters in an
-editor.
+**No type inference.** Without types, `x.foo` offers every class defining
+`foo`, which is the honest answer. Inlay hints and keyword-argument completion
+go further and stay silent unless the receiver is a literal class name: both
+render as though they were in the source, and a guess there would read as a
+fact.
 
-Reproduce with:
+**Rename refuses methods**, and says why. `.play` is dispatched at run time, so
+nothing distinguishes one class's `play` from another's, and rewriting every
+`.play` in a workspace would break the classes that were not meant. Instance
+variables are refused for the same kind of reason: `var <count` generates
+`count` and `count_`, and subclasses inherit both. Find-references has no such
+restriction, because a wrong row in a list costs a glance rather than a working
+program.
 
-```bash
-cargo run --release --example conformance -- \
-  /Applications/SuperCollider.app/Contents/Resources/SCClassLibrary \
-  ~/Library/Application\ Support/SuperCollider/Extensions
-```
+**No `~envir` completion.** Environment variables live in a running image and
+nothing static can enumerate them. This is the one real capability given up by
+never contacting sclang, and it is worth the exchange.
 
-Note that lexing is a substantially lower bar than parsing; a clean sweep here
-means the token model is faithful, not that the language is fully handled.
+No SCDoc rendering, no semantic tokens, no document highlight yet.
 
-## Differential oracles
+## Why you can trust it
 
-Two, because they check different layers.
+Both halves of the front end are derived from SuperCollider's own, in
+`lang/LangSource`: the lexer is a port of `PyrLexer.cpp`, and the parser comes
+from the bison grammar in `Bison/lang11d`. A grammar maintained separately
+drifts, and the drift is invisible — it produces trees that parse without error
+but are wrong.
 
-### Lexer: against `sc_lexer`
+That claim is checked rather than asserted, against sclang itself:
 
-Upstream extracted their lexer into `langutils/sc_lexer`, a standalone library
-with a token dumper. We do **not** link it — this crate stays pure Rust so it
-cross-compiles without a C++ toolchain, and because their C++ API is newer and
-moves faster than the language does. Instead we build it and diff token streams,
-which buys fidelity without the build dependency.
-
-```bash
-./oracle/build-sc-lexer.sh
-cargo run --release --example lexer_oracle -- oracle/sc_lexer_dump <dir>...
-```
-
-```
-files compared : 680
-agreed exactly : 680 / 680 (100.00%)
-```
-
-Token for token, including trivia. The two taxonomies are reconciled on one
-axis only: upstream splits whitespace by character class (`Space`/`NewLine`/
-`Tab`) where we emit one token per run, so runs are coalesced before comparing.
-
-### Symbols: against the compiled class library
-
-This checks the real `sclang-index`, not a throwaway copy — so the index ships
-already validated.
-
-Parse rates say a tree was produced, not that it is *correct*. To check
-correctness, `oracle/` asks a running sclang what classes and methods it
-actually compiled — names, class/instance, argument names, source positions —
-and diffs that against what this crate extracts from the same files.
-
-```bash
-./oracle/run.sh
-```
-
-```
-classes  oracle  1764   ours  1757      (7 missing, 0 extra, 0 superclass mismatches)
-methods  oracle 14490   ours 14484      (6 missing, 0 extra)
-argument-name mismatches: 0
-
-methods matching sclang exactly (name and arguments): 14484 / 14490 (99.96%)
-```
-
-All 13 remaining differences come from two files that are not valid UTF-8 —
-Latin-1 sources from the 2000s that this crate currently refuses to read. That
-is the only known correctness gap.
-
-The class library is open-ended: anyone can add classes via Extensions or
-quarks. So there is no fixed set to check against and no useful fixture to
-commit — the differ takes its file list from the live sclang dump, which means
-it automatically covers whatever is installed on the machine it runs on. Re-run
-it after installing a quark or upgrading SuperCollider.
-
-A note on what this does *not* validate: it checks the symbol layer, which is
-what an index needs. It does not compare expression structure. `DumpParseNode.cpp`
-would give a full parse tree, but nothing in sclang ever calls `dump()` — no
-flag, no primitive, no caller — so reaching it would mean patching and
-rebuilding SuperCollider.
-
-## Parse-tree dump
-
-`DumpParseNode.cpp` has been in SuperCollider for years with no caller: no
-flag, no primitive, nothing. `oracle/expose-dumpparsenode.patch` adds an
-env-var hook so class-library compilation emits each file's parse tree.
-
-```bash
-./oracle/build-sclang-dump.sh          # clone, patch, build sclang only
-SCLANG_DUMP_PARSE=1 <build>/lang/sclang -a -l conf.yaml -i none quit.scd
-```
-
-```bash
-cargo run --release --example tree_oracle -- dump.log
-```
-
-```
-methods compared  : 9,731
-selectors compared: 53,684
-selector sequences identical: 9,731 / 9,731 (100.00%)
-```
-
-Node-for-node comparison is impossible — the IR is desugared for a code
-generator. What compares is the **pre-order sequence of selectors** in each
-method body, which is sensitive to the thing that matters: `(1 + 2) * 3` emits
-`*` then `+`, while `1 + (2 * 3)` emits `+` then `*`. Making the parser
-right-associative drops it to 95.68%; emitting a selector after its arguments
-instead of before drops it to 59.73%.
-
-Reaching it needs a translation layer for the rewrites sclang performs while
-parsing, each verified against the dump directly:
-
-| source | sclang emits |
+| | |
 |---|---|
-| `arr[3]` | `Call 'at'` |
-| `arr[3] = 9` | `Call 'put'` |
-| `arr[1..3]` | `Call 'copySeries'` |
-| `(1..10)` | `Call 'prSimpleNumberSeries'` |
-| `Point(1, 2)` | `Call 'new'` |
-| `f(*args)` | `Call 'performList'` |
-| `super.f(*args)` | `Call 'superPerformList'` |
-| `obj.bar = 7` | nothing |
-| `f.(1)` | `Call 'value'` |
-| `~x` / `~x = 5` | `Call 'envirGet'` / `'envirPut'` |
-| `arr[1..2] = x` | `Call 'putSeries'` |
-| `Set[1, 2]` | a literal, no call |
+| Tokens, against upstream's `sc_lexer` | 680 / 680 files agree exactly |
+| Symbols, against the compiled class library | 14,484 / 14,490 methods match exactly |
+| Expression structure, against sclang's parse dump | 9,731 / 9,731 method bodies identical |
+| Every `.sc` class file in the corpus | parses |
 
-Every divergence found along the way turned out to be a bug in sclang's
-dumper rather than in this parser.
+[CONFORMANCE.md](CONFORMANCE.md) has the detail, including the five bugs in
+sclang's own parse-tree dumper that had to be fixed before the last of those
+meant anything.
 
-### Five bugs in sclang's own dumper
+## Documentation
 
-All bit-rot in code that has had no caller for years, and all had to be fixed
-before the oracle was worth anything:
-
-- `dumpPushLit` read its slot with `slotRawObject` where `newPyrPushLitNode`
-  had filled it with `SetPtr` — the wrong union member. Function literals never
-  dumped at all: zero `Func` lines across the class library. Fixing it yields
-  13,400, and block interiors became comparable.
-- `PyrMethodNode::dump` and `PyrBlockNode::dump` never emitted `mVarlist`, so
-  `var x = this.foo` initialisers were invisible.
-- Dumping the `PyrVarListNode` chain repeats declarations: the VarDef chain
-  already spans every `var` statement, while each list after the first points
-  partway along it. Dumping the defs directly fixes it.
-- `PyrMethodNode::dump` never printed `mIsClassMethod`, so `*make` and `make`
-  were indistinguishable — and classes routinely have both.
-- `PyrCurryArgNode::dump` never dumped its `mNext`, alone among node types, so
-  an argument list was truncated at the first `_` and everything after it
-  vanished. This accounted for the last ten disagreements.
-
-## Stability properties
-
-The parser exists because sclang's own cannot handle incomplete input, so the
-properties worth asserting are about edits, not about well-formed files.
-
-Note that the naive idempotence property — parse, print, reparse, compare — is
-*trivially* true for a lossless tree: printing returns the source byte for
-byte, so reparsing is the same call twice. One test pins it as a guard, but it
-finds nothing alone. What finds bugs is stability under truncation and
-mutation:
-
-```bash
-cargo run --release --example stability -- <dir>...
-```
-
-```
-files              : 682
-prefixes parsed    : 357,716
-mutations parsed   : 27,200
-panics             : 0
-losslessness breaks: 0
-```
-
-Every prefix of every file is what the parser sees on each keystroke, so
-parsing all of them is a direct simulation of typing the class library from
-scratch. Mutations add random single-character deletions and delimiter
-insertions.
-
-These have teeth: injecting a one-line bug into the tree builder (dropping
-trailing tokens) fails 6 of the 8 idempotence tests and makes the sweep report
-the exact prefixes affected.
-
-## Tests
-
-```bash
-cargo test
-```
-
-The suite asserts specific token sequences for specific constructs, plus two
-invariants that hold for *any* input: the stream is always lossless, and the
-lexer never panics. Those two catch far more than the targeted cases do.
+- [CONFORMANCE.md](CONFORMANCE.md) — how the front end is derived and verified
+- [ARCHITECTURE.md](ARCHITECTURE.md) — the design decisions behind the topology
+- [`editors/vscode`](editors/vscode) — the extension, and running code
 
 ## License
 
