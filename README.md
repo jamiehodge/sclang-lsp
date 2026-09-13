@@ -23,6 +23,7 @@ installed at all. It never starts sclang and never talks to one.
 | **Signature help** | The call being typed, with the current parameter marked. `name:` selects its own parameter rather than its position |
 | **Hover** | Signature, superclass chain, and the comment above the definition. For a local, what kind of binding it is and its default |
 | **Goto-definition** | Exact for a class, a class receiver or a local; every implementor otherwise |
+| **Goto-implementation** | Every class defining a selector; on a class name, its subclasses |
 | **Find references** | Exact for a local or a class name; textual for a selector, since dispatch is dynamic |
 | **Rename** | Function locals and class names — everything whose uses can be enumerated completely |
 | **Inlay hints** | The parameter each positional argument fills |
@@ -52,6 +53,20 @@ Not on the Marketplace yet. To build it yourself, see
 
 > Disable any other SuperCollider extension first. Two extensions contributing
 > the `supercollider` language means two servers answering every request.
+
+### Claude Code
+
+Claude Code speaks LSP natively, so this is a plugin with no code in it:
+
+```
+/plugin marketplace add jamiehodge/sclang-lsp
+/plugin install sclang-lsp
+```
+
+It needs the binary on `PATH` — see [its README](editors/claude-code). The
+request Claude gets most use from is goto-implementation, since "every class
+defining this selector" is the honest answer in a dynamically dispatched
+language.
 
 ### Everything else
 
@@ -175,6 +190,7 @@ meant anything.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — building, testing, and where the bar is
 - [CHANGELOG.md](CHANGELOG.md) — what changed and when
 - [`editors/vscode`](editors/vscode) — the extension, and running code
+- [`editors/claude-code`](editors/claude-code) — the Claude Code plugin
 
 ## License
 

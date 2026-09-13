@@ -740,3 +740,68 @@ fn an_unsaved_buffer_contributes_to_completion_elsewhere() {
         "a class in an unsaved buffer should still be offered"
     );
 }
+
+/// Goto-definition picks one place; goto-implementation lists them all. In a
+/// dynamically dispatched language the second is often the question with the
+/// real answer.
+#[test]
+fn implementation_lists_every_class_defining_a_selector() {
+    let mut h = Harness::start("impl", &mini_library());
+    let uri = h.open("Use.scd", "SinOsc.ar(440)\n");
+
+    // `ar` is defined by both SinOsc and Saw in the miniature library.
+    let response: Option<GotoDefinitionResponse> =
+        h.request_at("textDocument/implementation", &uri, 0, 8);
+
+    let locations = match response {
+        Some(GotoDefinitionResponse::Array(l)) => l,
+        Some(GotoDefinitionResponse::Scalar(l)) => vec![l],
+        other => panic!("expected implementations, got {other:?}"),
+    };
+
+    let files: Vec<String> = locations
+        .iter()
+        .map(|l| l.uri.path().rsplit('/').next().unwrap().to_string())
+        .collect();
+
+    assert!(files.contains(&"SinOsc.sc".to_string()), "got {files:?}");
+    assert!(
+        files.contains(&"Saw.sc".to_string()),
+        "Saw also defines `ar`, so it is an implementation: {files:?}"
+    );
+}
+
+/// On a class name, the nearest thing SuperCollider has to implementations of
+/// an interface is the set of subclasses.
+#[test]
+fn implementation_on_a_class_name_lists_subclasses() {
+    let mut h = Harness::start("impl-subclasses", &mini_library());
+    let uri = h.open("Use.scd", "UGen\n");
+
+    let response: Option<GotoDefinitionResponse> =
+        h.request_at("textDocument/implementation", &uri, 0, 2);
+
+    let locations = match response {
+        Some(GotoDefinitionResponse::Array(l)) => l,
+        other => panic!("expected subclasses, got {other:?}"),
+    };
+
+    let files: Vec<String> = locations
+        .iter()
+        .map(|l| l.uri.path().rsplit('/').next().unwrap().to_string())
+        .collect();
+
+    assert!(files.contains(&"SinOsc.sc".to_string()), "got {files:?}");
+    assert!(files.contains(&"Saw.sc".to_string()), "got {files:?}");
+}
+
+/// A local is bound in exactly one place, so there is nothing to list.
+#[test]
+fn implementation_says_nothing_about_a_local() {
+    let mut h = Harness::start("impl-local", &mini_library());
+    let uri = h.open("Local.scd", "{ |freq| freq }\n");
+
+    let response: Option<GotoDefinitionResponse> =
+        h.request_at("textDocument/implementation", &uri, 0, 11);
+    assert!(response.is_none(), "got {response:?}");
+}

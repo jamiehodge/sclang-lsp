@@ -1,0 +1,35 @@
+{
+  "name": "sclang-lsp",
+  "owner": {
+    "name": "Jamie Hodge",
+    "email": "448777+jamiehodge@users.noreply.github.com"
+  },
+  "metadata": {
+    "description": "SuperCollider language intelligence for Claude Code, served by sclang-lsp."
+  },
+  "plugins": [
+    {
+      "name": "sclang-lsp",
+      "description": "SuperCollider language server for code intelligence. Reads the class library by parsing it, so it works with sclang absent, broken or busy.",
+      "version": "0.4.0",
+      "author": {
+        "name": "Jamie Hodge",
+        "email": "448777+jamiehodge@users.noreply.github.com"
+      },
+      "homepage": "https://github.com/jamiehodge/sclang-lsp",
+      "license": "GPL-3.0-or-later",
+      "source": "./editors/claude-code",
+      "category": "development",
+      "strict": false,
+      "lspServers": {
+        "sclang-lsp": {
+          "command": "sclang-lsp",
+          "extensionToLanguage": {
+            ".sc": "supercollider",
+            ".scd": "supercollider"
+          }
+        }
+      }
+    }
+  ]
+}

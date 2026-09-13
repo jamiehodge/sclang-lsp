@@ -3,6 +3,21 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## Unreleased
+
+### Added
+
+- **`textDocument/implementation`.** Goto-definition has to pick one place;
+  this lists them all, which in a dynamically dispatched language is usually
+  the question with a real answer. On a selector, every class defining it. On a
+  method definition, every sibling of the override. On a class name, its
+  subclasses.
+
+- **A Claude Code plugin**, in [`editors/claude-code`](editors/claude-code).
+  Claude Code speaks LSP natively, so the plugin is a declaration and nothing
+  else — no adapter, no MCP server, no code. The repository is its own
+  marketplace: `/plugin marketplace add jamiehodge/sclang-lsp`.
+
 ## [0.4.0] — 2026-09-13
 
 ### Fixed

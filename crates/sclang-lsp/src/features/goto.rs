@@ -67,3 +67,48 @@ pub fn goto_definition(
         _ => Some(GotoDefinitionResponse::Array(locations)),
     }
 }
+
+/// How many subclasses to offer before a picker stops being navigation.
+const MAX_SUBCLASSES: usize = 100;
+
+/// Goto implementation.
+///
+/// Where goto-definition answers "where does *this* call go", this answers
+/// "where else could it go" — which in a dynamically dispatched language is the
+/// more useful question of the two, and the one the index was already built to
+/// answer.
+///
+/// On a selector, every class defining it, whether or not the receiver is
+/// known: narrowing is what definition is for. On a method definition, every
+/// other class defining the same name, which is how you find the siblings of an
+/// override. On a class name, its subclasses — the nearest thing SuperCollider
+/// has to implementations of an interface.
+pub fn goto_implementation(
+    doc: &Document,
+    index: &SymbolIndex,
+    offset: u32,
+    resolver: &Resolver<'_>,
+) -> Option<GotoDefinitionResponse> {
+    let point = point_at(&doc.parse().root, &doc.text, offset, Bias::Inside);
+
+    let locations: Vec<_> = match point {
+        Point::Selector { name, .. } | Point::MethodName { name, .. } => index
+            .implementors(&name)
+            .into_iter()
+            .take(MAX_IMPLEMENTORS)
+            .filter_map(|m| resolver.resolve(&m.location))
+            .collect(),
+
+        Point::ClassName(name) => index
+            .subclasses(&name)
+            .into_iter()
+            .take(MAX_SUBCLASSES)
+            .filter_map(|c| resolver.resolve(&c.location))
+            .collect(),
+
+        // A local is bound in one place and has no implementations.
+        Point::Local { .. } | Point::Nothing => Vec::new(),
+    };
+
+    (!locations.is_empty()).then_some(GotoDefinitionResponse::Array(locations))
+}

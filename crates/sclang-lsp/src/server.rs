@@ -220,6 +220,13 @@ impl Server {
                     features::goto::goto_definition(&uri, doc, &s.index, offset, &resolver)
                 })
             }
+            request::GotoImplementation::METHOD => {
+                self.handle::<request::GotoImplementation>(req, |s, p| {
+                    let (doc, offset) = s.locate(&p.text_document_position_params)?;
+                    let resolver = Resolver::new(&s.docs, s.enc);
+                    features::goto::goto_implementation(doc, &s.index, offset, &resolver)
+                })
+            }
             request::DocumentSymbolRequest::METHOD => self
                 .handle::<request::DocumentSymbolRequest>(req, |s, p| {
                     let uri = p.text_document.uri;
@@ -570,6 +577,10 @@ pub fn capabilities(enc: PositionEncoding) -> ServerCapabilities {
         inlay_hint_provider: Some(OneOf::Left(true)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
+        // Every class defining a selector. In a dynamically dispatched
+        // language this is the question with a real answer, where definition
+        // has to pick one.
+        implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
         references_provider: Some(OneOf::Left(true)),
         rename_provider: Some(OneOf::Right(RenameOptions {
             // Asked before the box opens, so a refusal explains itself instead
