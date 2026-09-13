@@ -79,10 +79,34 @@ pub(crate) fn source_file(p: &mut Parser) {
     m.complete(p, SourceFile);
 }
 
-/// A class definition starts with a class name followed by `{`, `:` or `[`.
-/// Anything else beginning with a class name is an expression (`SinOsc.ar`).
+/// A class definition starts with a class name followed by `{` or `:`, or by
+/// the indexed form's `[ optname ]`. Anything else beginning with a class name
+/// is an expression (`SinOsc.ar`).
+///
+/// The bracket needs looking through. `classdef` is
+/// `classname '[' optname ']' superclass '{' … '}'`, where `optname` is at most
+/// one identifier — so a `[` must be followed by `]` or by an identifier and
+/// `]`, and then by the `:` or `{` that a class definition requires. Without
+/// that check every literal collection at the start of a statement was read as
+/// a class definition: `Set[1, 2, 3]`, `Bag["a"]`, `List[1, 2]` all begin
+/// exactly like one.
 fn at_class_def(p: &Parser) -> bool {
-    p.at(ClassName) && matches!(p.nth(1), LBrace | Colon | LBracket)
+    if !p.at(ClassName) {
+        return false;
+    }
+    match p.nth(1) {
+        LBrace | Colon => true,
+        LBracket => {
+            // `Foo[]` or `Foo[name]`, then what follows the `]`.
+            let after = match (p.nth(2), p.nth(3)) {
+                (RBracket, next) => next,
+                (Ident, RBracket) => p.nth(4),
+                _ => return false,
+            };
+            matches!(after, LBrace | Colon)
+        }
+        _ => false,
+    }
 }
 
 /// ```text

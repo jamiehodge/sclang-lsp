@@ -194,7 +194,53 @@ whenever *our* side had none, which is exactly the case in question. That
 accommodation is gone, and the check now reports 0 mismatches across 1,757
 classes meaningfully rather than by omission.
 
+### Scripts: against sclang's own compiler
+
+Every oracle above runs over the class library, and the class library is `.sc`
+class files. Those never contain a top-level `( … )` block, a bare `var`, a
+literal collection at the start of a statement, or most of what `cmdlinecode`
+allows. The syntax people actually type into a scratch buffer had no
+differential coverage at all — and the parser had drifted there, in ways a
+99.96% symbol match said nothing about.
+
+The corpus is the help files: every `code::` block, which is thousands of
+runnable examples written by the people who designed the language, plus any
+`.scd` files installed. `String:compile` is `thisProcess.interpreter.compile`,
+which parses a string as `cmdlinecode` and returns a Function or nil. It runs
+nothing, which is the only reason this is possible: evaluating the corpus would
+boot servers, open windows and make noise.
+
+```bash
+./oracle/run-scd.sh
+```
+
+```
+snippets compared         : 4,785
+lossless                  : 4,785 / 4,785  (all)
+sclang accepts, we do not : 42
+```
+
+The asymmetry is the point. A snippet sclang accepts and this rejects is a bug
+here. The other direction is softer — this parser is deliberately error
+tolerant, and a fragment it makes sense of is not automatically wrong — but a
+large gap that way means the grammar has drifted permissive.
+
+**It found three bugs in its first run.** Two adjacent top-level blocks read as
+a call; `var` and `arg` declarations rejected inside a top-level block; and
+every literal collection at the start of a statement — `Set[1, 2, 3]`,
+`Bag["a"]`, `List[1, 2]` — parsed as an indexed class definition, because
+`Set[1,` begins exactly like `Array[slot] :`. That last one alone accounted for
+82 of the 125 disagreements the first run reported.
+
+The 42 that remain are genuinely unimplemented rather than wrong: list
+comprehensions (`{: expr, x <- (0..10) }`), the `(:a..b)` series form, a few
+characters the lexer does not know, and `ClassName { … }` at the top level of a
+script — which is a call there and a class definition in a `.sc` file, and needs
+the parser to know which kind of file it is reading.
+
 ### What it does not check
+
+
 
 That `Foo(...)` produces an instance of `Foo`. `Foo(...)` is `Foo.new(...)` by
 the grammar, and `*new` returns an instance of the class it was sent to — but by

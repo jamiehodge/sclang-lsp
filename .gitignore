@@ -8,3 +8,5 @@ editors/*/out/
 editors/*/*.vsix
 editors/vscode/server/
 oracle/oracle-resolution.tsv
+oracle/oracle-scd.tsv
+oracle/scd-corpus/

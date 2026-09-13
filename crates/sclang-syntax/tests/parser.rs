@@ -553,3 +553,36 @@ fn two_blocks_of_real_code_keep_their_own_boundaries() {
     );
     assert_lossless(src);
 }
+
+/// `Set[1, 2, 3]` begins exactly like the indexed class definition
+/// `Array[slot] : ArrayedCollection { … }`, and was parsed as one. Every
+/// literal collection at the start of a statement was affected, which is 82 of
+/// the help-file examples the script oracle checks.
+#[test]
+fn a_literal_collection_is_not_a_class_definition() {
+    for src in [
+        "Set[1, 2, 3].powerset;",
+        "Bag[\"a\", \"b\"].contents;",
+        "List[1, 2, 3].sum;",
+        "Set[\\a, \\b];",
+    ] {
+        assert_eq!(
+            count(src, SyntaxKind::ClassDef),
+            0,
+            "{src} is an expression, not a class definition"
+        );
+        assert_lossless(src);
+    }
+}
+
+/// The form it was being confused with still parses, in both its shapes.
+#[test]
+fn indexed_class_definitions_still_parse() {
+    let named = "Array[slot] : ArrayedCollection { foo { ^1 } }";
+    assert_eq!(count(named, SyntaxKind::ClassDef), 1);
+    assert_eq!(count(named, SyntaxKind::IndexedSlot), 1);
+
+    // `optname` is optional, and the superclass may be left out.
+    assert_eq!(count("Foo[] { bar { ^1 } }", SyntaxKind::ClassDef), 1);
+    assert_eq!(count("Foo[slot] { bar { ^1 } }", SyntaxKind::ClassDef), 1);
+}
