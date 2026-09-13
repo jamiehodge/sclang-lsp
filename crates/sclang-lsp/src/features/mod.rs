@@ -1,5 +1,6 @@
 pub mod completion;
 pub mod diagnostics;
+pub mod document_highlight;
 pub mod find_references;
 pub mod goto;
 pub mod hover;

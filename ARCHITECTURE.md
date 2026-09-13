@@ -46,6 +46,15 @@ already managing one for the user.
 The cost of dropping it is small and specific, and it is listed under
 *Deliberately not done* below rather than hidden.
 
+Reading from disk is also the thing that can go stale. The index only hears
+about files the editor has open, so anything changing underneath it — a branch
+switch, a quark install, an edit in another program — would leave answers that
+are confidently wrong, which is the worst way for an index to fail. So the
+server registers a `**/*.sc` watch with the client and re-reads what it is
+told about. An open buffer still outranks the file: the server owns document
+text, and what is on disk under an unsaved edit is by definition the stale
+copy.
+
 ### The test that keeps it honest
 
 **Delete sclang, start the server, and confirm completion and goto-definition

@@ -25,6 +25,7 @@ installed at all. It never starts sclang and never talks to one.
 | **Goto-definition** | Exact for a class, a class receiver or a local; every implementor otherwise |
 | **Goto-implementation** | Every class defining a selector; on a class name, its subclasses |
 | **Find references** | Exact for a local or a class name; textual for a selector, since dispatch is dynamic |
+| **Document highlight** | The other places a name is written in this file, with the declaration marked |
 | **Rename** | Function locals and class names — everything whose uses can be enumerated completely |
 | **Inlay hints** | The parameter each positional argument fills |
 | **Semantic tokens** | Colour from the parse tree: a selector is a method, a name declared as `arg` stays a parameter wherever it appears. `full`, `range` and `full/delta` |
@@ -32,7 +33,9 @@ installed at all. It never starts sclang and never talks to one.
 | **Selection ranges** | Expand-selection, following the real syntax |
 
 Unsaved edits count immediately: a class that exists only in a buffer is
-visible to completion everywhere else.
+visible to completion everywhere else. Files that change on disk count too —
+the server asks the client to watch `.sc` files, so a `git checkout` or a quark
+install does not leave the index describing code that has moved.
 
 ## Install
 
@@ -166,7 +169,7 @@ program.
 nothing static can enumerate them. This is the one real capability given up by
 never contacting sclang, and it is worth the exchange.
 
-No SCDoc rendering and no document highlight yet.
+No SCDoc rendering yet.
 
 ## Why you can trust it
 

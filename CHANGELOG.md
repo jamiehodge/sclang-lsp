@@ -3,6 +3,27 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## Unreleased
+
+### Added
+
+- **Document highlight.** The other places a name is written in the file,
+  with the declaration marked as a write and the uses as reads. The same
+  question find-references answers and the same three standards of proof —
+  exact for a local, exact for a class name, textual for a selector — but a
+  highlight is a tint on a word already on screen, so the textual answer is
+  worth giving here even though it is too weak to rename on.
+
+- **Files changing on disk reach the index.** It previously heard only about
+  buffers the editor had open, so a `git checkout`, a quark install, or an edit
+  made in another program left goto-definition pointing at locations that had
+  moved — with nothing to say so. The server now registers a `**/*.sc` watch
+  with clients that support one and re-reads what it is told about.
+
+  An open buffer still outranks the file. The server owns document text, so
+  what is on disk beneath an unsaved edit is the stale copy, and `didSave`
+  already covers the saved case.
+
 ## [0.7.3] — 2026-09-13
 
 ### Fixed

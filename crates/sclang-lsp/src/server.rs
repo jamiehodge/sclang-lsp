@@ -28,6 +28,12 @@ pub struct Server {
     /// What semantic tokens each open document was last sent, so a client can
     /// be told what changed rather than sent the whole array again.
     tokens: features::semantic_tokens::Cache,
+    /// Whether the client will watch files for us if asked. There is no static
+    /// capability for it, so the only way to find out is to read this and
+    /// register afterwards.
+    watches_files: bool,
+    /// Ids for the requests this server makes. Only registration so far.
+    next_request: i32,
     enc: PositionEncoding,
     sender: Sender<Message>,
 }
@@ -47,6 +53,13 @@ impl Server {
 
         let enc = negotiate_encoding(&params);
         let roots = roots_from(&params);
+        let watches_files = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|w| w.did_change_watched_files.as_ref())
+            .and_then(|w| w.dynamic_registration)
+            .unwrap_or(false);
 
         connection.initialize_finish(id, serde_json::to_value(initialize_result(enc))?)?;
 
@@ -66,9 +79,15 @@ impl Server {
             index: SymbolIndex::default(),
             references: ReferenceIndex::default(),
             tokens: Default::default(),
+            watches_files,
+            next_request: 0,
             enc,
             sender: connection.sender.clone(),
         };
+        // `initialize_finish` consumes the `initialized` notification, so the
+        // event loop never sees it. This is the moment after the handshake,
+        // which is the first point a server may ask the client for anything.
+        server.watch_class_files();
         server.event_loop(&connection, scan_rx)
     }
 
@@ -97,8 +116,10 @@ impl Server {
                             self.request(req);
                         }
                         Message::Notification(note) => self.notification(note),
-                        // Responses to requests we made. The server asks the
-                        // client nothing yet, so there is nothing to match up.
+                        // Responses to requests we made. The only one is the
+                        // file-watch registration, whose failure would show up
+                        // as stale answers rather than as anything to handle
+                        // here.
                         Message::Response(_) => {}
                     }
                 }
@@ -175,6 +196,18 @@ impl Server {
                     ))
                 })
             }
+            request::DocumentHighlightRequest::METHOD => self
+                .handle::<request::DocumentHighlightRequest>(req, |s, p| {
+                    let uri = p.text_document_position_params.text_document.uri.clone();
+                    let (doc, offset) = s.locate(&p.text_document_position_params)?;
+                    features::document_highlight::document_highlight(
+                        &uri,
+                        doc,
+                        &s.references,
+                        offset,
+                        s.enc,
+                    )
+                }),
             request::References::METHOD => self.handle::<request::References>(req, |s, p| {
                 let uri = p.text_document_position.text_document.uri.clone();
                 let (doc, offset) = s.locate(&p.text_document_position)?;
@@ -418,12 +451,97 @@ impl Server {
                     self.send_diagnostics(uri, Vec::new(), None);
                 }
             }
+            notification::DidChangeWatchedFiles::METHOD => {
+                if let Some(p) = extract::<notification::DidChangeWatchedFiles>(note) {
+                    for change in p.changes {
+                        self.disk_changed(&change.uri, change.typ);
+                    }
+                }
+            }
             notification::DidSaveTextDocument::METHOD => {
                 if let Some(p) = extract::<notification::DidSaveTextDocument>(note) {
                     self.reindex(&p.text_document.uri);
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Ask the client to report `.sc` files changing on disk.
+    ///
+    /// Without this the index only ever hears about files the editor has open,
+    /// so a `git checkout`, a quark install, or an edit made in another
+    /// program leaves goto-definition pointing at locations that have moved.
+    /// Nothing announces that; the answers are simply wrong, which is the
+    /// worst way for an index to fail.
+    ///
+    /// `.sc` only, matching what the startup scan reads. A `.scd` is a script
+    /// meant to be evaluated rather than a file of class definitions, and
+    /// several in the stock library do not parse as a whole file by design.
+    fn watch_class_files(&mut self) {
+        if !self.watches_files {
+            return;
+        }
+        let options = DidChangeWatchedFilesRegistrationOptions {
+            watchers: vec![FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.sc".to_string()),
+                // Omitted means create, change and delete, which is all three.
+                kind: None,
+            }],
+        };
+        let params = RegistrationParams {
+            registrations: vec![Registration {
+                id: "sclang-lsp-watch-class-files".to_string(),
+                method: notification::DidChangeWatchedFiles::METHOD.to_string(),
+                register_options: serde_json::to_value(options).ok(),
+            }],
+        };
+
+        self.next_request += 1;
+        self.send(Message::Request(Request {
+            id: RequestId::from(self.next_request),
+            method: request::RegisterCapability::METHOD.to_string(),
+            params: match serde_json::to_value(params) {
+                Ok(value) => value,
+                Err(e) => {
+                    log(&format!("could not register a file watch: {e}"));
+                    return;
+                }
+            },
+        }));
+    }
+
+    /// Re-read one file the client says changed underneath us.
+    ///
+    /// An open buffer wins, always. The server owns document text, so what is
+    /// on disk beneath an unsaved edit is the stale copy — and saving already
+    /// re-indexes through `didSave`.
+    fn disk_changed(&mut self, uri: &Url, change: FileChangeType) {
+        if self.docs.get(uri).is_some() {
+            return;
+        }
+        let path = uri_to_path(uri);
+        if path.extension().is_none_or(|e| e != "sc") {
+            return;
+        }
+
+        // A delete, or a create/change for something that cannot be read —
+        // removed again between the event and this read, or not valid UTF-8.
+        // Dropping what was recorded is right for all of them: the alternative
+        // is keeping symbols for a file that no longer says what they claim.
+        let source = (change != FileChangeType::DELETED)
+            .then(|| std::fs::read_to_string(&path).ok())
+            .flatten();
+
+        match source {
+            Some(text) => {
+                self.index.index_file(&path, &text);
+                self.references.index_file(&path, &text);
+            }
+            None => {
+                self.index.remove_file(&path);
+                self.references.remove_file(&path);
+            }
         }
     }
 
@@ -618,6 +736,7 @@ pub fn capabilities(enc: PositionEncoding) -> ServerCapabilities {
         // has to pick one.
         implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
         references_provider: Some(OneOf::Left(true)),
+        document_highlight_provider: Some(OneOf::Left(true)),
         rename_provider: Some(OneOf::Right(RenameOptions {
             // Asked before the box opens, so a refusal explains itself instead
             // of appearing after the user has typed a new name.

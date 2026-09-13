@@ -19,6 +19,9 @@ pub struct Harness {
     thread: Option<std::thread::JoinHandle<()>>,
     next_id: i32,
     pub dir: PathBuf,
+    /// Requests the *server* sent us, kept because they arrive during the
+    /// handshake and would otherwise be discarded before a test could look.
+    seen_requests: std::cell::RefCell<Vec<Request>>,
     /// What the server advertised at `initialize`. A client keeps these for
     /// the life of the session, so a test that decodes a response should use
     /// them rather than anything the crate knows privately.
@@ -50,6 +53,7 @@ impl Harness {
             thread: Some(thread),
             next_id: 0,
             dir,
+            seen_requests: std::cell::RefCell::new(Vec::new()),
             capabilities: ServerCapabilities::default(),
         };
         h.capabilities = h.initialize().capabilities;
@@ -58,7 +62,14 @@ impl Harness {
 
     fn initialize(&mut self) -> InitializeResult {
         let params = serde_json::json!({
-            "capabilities": {},
+            "capabilities": {
+                // The server registers a file watch only if told the client
+                // can honour one, so this has to be here for that path to run
+                // at all.
+                "workspace": {
+                    "didChangeWatchedFiles": { "dynamicRegistration": true },
+                },
+            },
             "initializationOptions": {
                 "classLibraryPaths": [self.dir.to_str().unwrap()],
             },
@@ -191,8 +202,37 @@ impl Harness {
         }
     }
 
+    /// Wait for a request the *server* makes of us.
+    ///
+    /// It may already have arrived: the handshake reads messages until the
+    /// scan reports in, and with a small class library that can happen before
+    /// the server has processed `initialized`. So check what was seen, then
+    /// keep reading.
+    pub fn await_server_request(&self, method: &str) -> serde_json::Value {
+        if let Some(params) = self
+            .seen_requests
+            .borrow()
+            .iter()
+            .find(|r| r.method == method)
+            .map(|r| r.params.clone())
+        {
+            return params;
+        }
+        loop {
+            if let Message::Request(request) = self.recv() {
+                if request.method == method {
+                    return request.params;
+                }
+            }
+        }
+    }
+
     fn recv(&self) -> Message {
         match self.client.receiver.recv_timeout(TIMEOUT) {
+            Ok(Message::Request(request)) => {
+                self.seen_requests.borrow_mut().push(request.clone());
+                Message::Request(request)
+            }
             Ok(msg) => msg,
             Err(RecvTimeoutError::Timeout) => panic!("timed out waiting for the server"),
             Err(RecvTimeoutError::Disconnected) => panic!("server disconnected"),

@@ -67,6 +67,25 @@ impl ReferenceIndex {
         self.by_file.values().map(|v| v.len()).sum()
     }
 
+    /// The same, narrowed to one file.
+    ///
+    /// Document highlight asks find-references' question about a single
+    /// buffer, so it wants the same occurrence set without paying for a scan
+    /// of the workspace.
+    pub fn in_file(
+        &self,
+        path: &Path,
+        name: &str,
+        accept: impl Fn(OccurrenceKind) -> bool,
+    ) -> Vec<&Occurrence> {
+        self.by_file
+            .get(path)
+            .into_iter()
+            .flatten()
+            .filter(|o| o.name == name && accept(o.kind))
+            .collect()
+    }
+
     /// Every occurrence of `name` whose kind the predicate accepts.
     ///
     /// Collected rather than lazy: the result is walked once by the caller and

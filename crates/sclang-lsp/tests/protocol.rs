@@ -263,7 +263,7 @@ fn closing_a_buffer_falls_back_to_what_is_on_disk() {
 #[test]
 fn an_unknown_request_is_an_error_not_a_crash() {
     let mut h = Harness::start("unknown", &mini_library());
-    let id = h.send_request("textDocument/documentHighlight", serde_json::json!({}));
+    let id = h.send_request("textDocument/formatting", serde_json::json!({}));
     let response = h.await_response(id);
     assert!(response.error.is_some());
 
@@ -649,6 +649,165 @@ fn decode_tokens<'a>(h: &'a Harness, tokens: &SemanticTokens) -> Vec<(u32, u32, 
             )
         })
         .collect()
+}
+
+#[test]
+fn document_highlight_marks_a_local_and_its_declaration() {
+    let mut h = Harness::start("highlight-local", &mini_library());
+    let uri = h.open("Test.scd", "{ |freq| freq + freq }\n");
+    let _ = h.await_diagnostics(&uri);
+
+    // On the second `freq`, a use.
+    let found: Vec<DocumentHighlight> = h.request_at("textDocument/documentHighlight", &uri, 0, 9);
+
+    let marks: Vec<_> = found
+        .iter()
+        .map(|d| (d.range.start.character, d.kind.unwrap()))
+        .collect();
+    assert_eq!(
+        marks,
+        vec![
+            (3, DocumentHighlightKind::WRITE),
+            (9, DocumentHighlightKind::READ),
+            (16, DocumentHighlightKind::READ),
+        ],
+        "the declaration is written, the uses are read"
+    );
+}
+
+#[test]
+fn document_highlight_respects_shadowing() {
+    let mut h = Harness::start("highlight-shadow", &mini_library());
+    let uri = h.open("Test.scd", "{ |v| { |v| v } }\n");
+    let _ = h.await_diagnostics(&uri);
+
+    // The inner `v` at the end belongs to the inner binding, and the outer
+    // declaration must not be swept in on a name match.
+    let found: Vec<DocumentHighlight> = h.request_at("textDocument/documentHighlight", &uri, 0, 12);
+    let columns: Vec<_> = found.iter().map(|d| d.range.start.character).collect();
+    assert_eq!(columns, vec![9, 12], "only the inner binding: {found:?}");
+}
+
+#[test]
+fn document_highlight_on_a_class_stays_in_this_file() {
+    let mut h = Harness::start("highlight-class", &mini_library());
+    // `SinOsc` is all over the class library; a highlight is about this file.
+    let uri = h.open("Test.scd", "SinOsc.ar(440);\nSinOsc.kr(1);\n");
+    let _ = h.await_diagnostics(&uri);
+
+    let found: Vec<DocumentHighlight> = h.request_at("textDocument/documentHighlight", &uri, 0, 2);
+    let lines: Vec<_> = found.iter().map(|d| d.range.start.line).collect();
+    assert_eq!(lines, vec![0, 1]);
+}
+
+#[test]
+fn document_highlight_says_nothing_about_whitespace() {
+    let mut h = Harness::start("highlight-none", &mini_library());
+    let uri = h.open("Test.scd", "SinOsc.ar(440);   \n");
+    let _ = h.await_diagnostics(&uri);
+
+    let found: Option<Vec<DocumentHighlight>> =
+        h.request_at("textDocument/documentHighlight", &uri, 0, 17);
+    assert!(
+        found.is_none_or(|f| f.is_empty()),
+        "nothing is under the cursor"
+    );
+}
+
+#[test]
+fn a_file_watch_is_registered_when_the_client_can_honour_one() {
+    let h = Harness::start("watch-register", &mini_library());
+
+    // Without this the index only ever hears about open buffers, and nothing
+    // says so — the answers are just stale.
+    let params = h.await_server_request("client/registerCapability");
+    let params: RegistrationParams = serde_json::from_value(params).unwrap();
+
+    let registration = params
+        .registrations
+        .iter()
+        .find(|r| r.method == "workspace/didChangeWatchedFiles")
+        .expect("a watch registration");
+    let options: DidChangeWatchedFilesRegistrationOptions =
+        serde_json::from_value(registration.register_options.clone().unwrap()).unwrap();
+    assert_eq!(
+        options.watchers[0].glob_pattern,
+        GlobPattern::String("**/*.sc".to_string()),
+        "class files only: a .scd is a script, not a file of definitions"
+    );
+}
+
+#[test]
+fn a_class_added_on_disk_is_indexed_without_being_opened() {
+    let mut h = Harness::start("watch-create", &mini_library());
+    let path = h.dir.join("Late.sc");
+    std::fs::write(&path, "Late : Object {\n\tready { ^true }\n}\n").unwrap();
+    let uri = Url::from_file_path(&path).unwrap();
+
+    h.send_notification(
+        "workspace/didChangeWatchedFiles",
+        serde_json::json!({ "changes": [{ "uri": uri, "type": 1 }] }),
+    );
+
+    let found: Option<WorkspaceSymbolResponse> =
+        h.request("workspace/symbol", serde_json::json!({ "query": "Late" }));
+    let Some(WorkspaceSymbolResponse::Flat(symbols)) = found else {
+        panic!("expected symbols");
+    };
+    assert!(
+        symbols.iter().any(|s| s.name == "Late"),
+        "a file created on disk should reach the index: {symbols:?}"
+    );
+}
+
+#[test]
+fn a_class_deleted_on_disk_leaves_the_index() {
+    let mut h = Harness::start("watch-delete", &mini_library());
+    let path = h.dir.join("Saw.sc");
+    std::fs::remove_file(&path).unwrap();
+    let uri = Url::from_file_path(&path).unwrap();
+
+    h.send_notification(
+        "workspace/didChangeWatchedFiles",
+        serde_json::json!({ "changes": [{ "uri": uri, "type": 3 }] }),
+    );
+
+    let found: Option<WorkspaceSymbolResponse> =
+        h.request("workspace/symbol", serde_json::json!({ "query": "Saw" }));
+    let Some(WorkspaceSymbolResponse::Flat(symbols)) = found else {
+        panic!("expected a response");
+    };
+    assert!(
+        !symbols.iter().any(|s| s.name == "Saw"),
+        "a deleted file should take its symbols with it: {symbols:?}"
+    );
+}
+
+#[test]
+fn an_open_buffer_outranks_what_the_watcher_reports() {
+    // The server owns document text. What is on disk beneath an unsaved edit
+    // is the stale copy, so a watch event for an open file must not overwrite
+    // the buffer's symbols with it.
+    let mut h = Harness::start("watch-open", &mini_library());
+    let path = h.dir.join("Held.sc");
+    std::fs::write(&path, "Held : Object { fromDisk { ^1 } }\n").unwrap();
+
+    let uri = h.open("Held.sc", "Held : Object { fromBuffer { ^1 } }\n");
+    let _ = h.await_diagnostics(&uri);
+
+    h.send_notification(
+        "workspace/didChangeWatchedFiles",
+        serde_json::json!({ "changes": [{ "uri": uri, "type": 2 }] }),
+    );
+
+    let found: Option<WorkspaceSymbolResponse> =
+        h.request("workspace/symbol", serde_json::json!({ "query": "from" }));
+    let Some(WorkspaceSymbolResponse::Flat(symbols)) = found else {
+        panic!("expected symbols");
+    };
+    let names: Vec<_> = symbols.iter().map(|s| s.name.as_str()).collect();
+    assert!(names.contains(&"fromBuffer"), "{names:?}");
+    assert!(!names.contains(&"fromDisk"), "{names:?}");
 }
 
 #[test]
