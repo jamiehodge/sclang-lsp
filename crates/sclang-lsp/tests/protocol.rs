@@ -805,3 +805,64 @@ fn implementation_says_nothing_about_a_local() {
         h.request_at("textDocument/implementation", &uri, 0, 11);
     assert!(response.is_none(), "got {response:?}");
 }
+
+/// A `.scd` file is usually several top-level `( … )` blocks. Evaluating one
+/// means finding its bounds without swallowing the next, which is what
+/// selection ranges are for — and what broke when the parser read `)` followed
+/// by `(` as a call.
+#[test]
+fn adjacent_blocks_have_their_own_selection_ranges() {
+    let mut h = Harness::start("two-blocks", &mini_library());
+    let source = "(\nSinOsc.ar(440);\n)\n\n(\nSaw.ar(220);\n)\n";
+    let uri = h.open("Two.scd", source);
+
+    // Byte offset of a position, so the text of a range can be inspected.
+    let offset = |p: Position| -> usize {
+        source
+            .lines()
+            .take(p.line as usize)
+            .map(|l| l.len() + 1)
+            .sum::<usize>()
+            + p.character as usize
+    };
+
+    // The same rule the editor applies: the widest range that starts a line
+    // and is parenthesised. That excludes the whole file, which starts at
+    // column 0 but ends with a newline rather than a `)`.
+    let block_at = |h: &mut Harness, line: u32, character: u32| -> Range {
+        let ranges: Vec<SelectionRange> = h.request(
+            "textDocument/selectionRange",
+            serde_json::json!({
+                "textDocument": { "uri": uri },
+                "positions": [{ "line": line, "character": character }],
+            }),
+        );
+        let mut widest = None;
+        let mut node = Some(&ranges[0]);
+        while let Some(step) = node {
+            let text = &source[offset(step.range.start)..offset(step.range.end)];
+            if step.range.start.character == 0 && text.starts_with('(') && text.ends_with(')') {
+                widest = Some(step.range);
+            }
+            node = step.parent.as_deref();
+        }
+        widest.expect("a block")
+    };
+
+    let first = block_at(&mut h, 1, 4);
+    let second = block_at(&mut h, 5, 4);
+
+    assert_eq!(first.start.line, 0, "first block starts at line 0");
+    assert_eq!(
+        first.end.line, 2,
+        "first block ends at its own `)`: {first:?}"
+    );
+    assert_eq!(
+        second.start.line, 4,
+        "second block starts after the blank line"
+    );
+    assert_eq!(
+        second.end.line, 6,
+        "second block ends at its own `)`: {second:?}"
+    );
+}

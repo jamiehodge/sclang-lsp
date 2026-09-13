@@ -45,7 +45,10 @@ impl Marker {
             *slot = kind;
         }
         p.events.push(Event::Finish);
-        CompletedMarker { pos: self.pos }
+        CompletedMarker {
+            pos: self.pos,
+            kind,
+        }
     }
 
     /// Discard this node. Any tokens consumed since it was opened stay where
@@ -75,9 +78,17 @@ impl Drop for Marker {
 #[derive(Clone, Copy)]
 pub struct CompletedMarker {
     pos: usize,
+    kind: SyntaxKind,
 }
 
 impl CompletedMarker {
+    /// What was built. The grammar needs this to decide whether an expression
+    /// may be followed by an argument list, which `lang11d` allows only for a
+    /// `name` or a `classname`.
+    pub fn kind(&self) -> SyntaxKind {
+        self.kind
+    }
+
     /// Open a new node that starts where this one starts, making this node its
     /// first child. This is how `a + b` becomes `BinaryExpr(a, +, b)` after
     /// `a` has already been parsed.

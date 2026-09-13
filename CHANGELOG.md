@@ -5,6 +5,23 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
 ## Unreleased
 
+### Fixed
+
+- **Adjacent top-level blocks are separate again.** A `.scd` file is normally a
+  sequence of `( … )` blocks with no separators between them, evaluated one at
+  a time — the file is never parsed as a unit. The parser allowed *any*
+  expression to be followed by an argument list, so a `)` on one line and a `(`
+  on the next read as a call, merging two blocks into one. Evaluating either
+  sent both, and sclang answered `unexpected '(', expecting end of file`.
+
+  `lang11d` has no `expr '(' arglist ')'` production: a callee is a `name` or a
+  `classname`, and the one exception, `'(' binop2 ')' '(' … ')'`, this parser
+  does not reach anyway. Calls are now restricted to match, with trailing `{ }`
+  blocks still attaching to a completed call so `if (a) { } { }` is unchanged.
+
+  The corpus improves with it — 622 of 628 files parsed clean before, 625 after
+  — and the symbol and resolution oracles are unmoved.
+
 ### Added
 
 - **`textDocument/implementation`.** Goto-definition has to pick one place;

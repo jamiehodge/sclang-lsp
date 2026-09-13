@@ -486,3 +486,70 @@ fn adjacent_string_literals_concatenate() {
     // the parser joins them into a single Literal node.
     assert_eq!(count(src, SyntaxKind::Literal), 1);
 }
+
+// =====================================================================
+// What may be called
+// =====================================================================
+
+/// A `.scd` file is normally a sequence of top-level `( … )` blocks, evaluated
+/// one at a time. They are not separated by semicolons and the file is never
+/// parsed as a unit, so each block has to stand on its own here.
+///
+/// This used to produce a single `CallExpr` spanning both: the parser allowed
+/// any expression to be followed by an argument list, so `)` then `(` read as a
+/// call. `lang11d` has no `expr '(' arglist ')'` production — a callee is a
+/// `name` or a `classname` — and sclang rejects the same input with
+/// "unexpected '(', expecting end of file".
+#[test]
+fn adjacent_top_level_blocks_are_separate() {
+    let src = "(\n1\n)\n\n(\n2\n)\n";
+    assert_eq!(count(src, SyntaxKind::ParenExpr), 2);
+    assert_eq!(count(src, SyntaxKind::CallExpr), 0);
+    assert_lossless(src);
+}
+
+#[test]
+fn a_parenthesised_expression_is_not_callable() {
+    // Neither with a newline between them nor without.
+    assert_eq!(count("(1)\n(2)", SyntaxKind::CallExpr), 0);
+    assert_eq!(count("(1)(2)", SyntaxKind::CallExpr), 0);
+}
+
+#[test]
+fn names_and_class_names_are_still_callable() {
+    assert_eq!(count("f(2)", SyntaxKind::CallExpr), 1);
+    assert_eq!(count("x = Point(1, 2);", SyntaxKind::CallExpr), 1);
+    // A trailing block, and a call that already has one: the grammar hangs the
+    // `blocklist` off the whole production, so both blocks belong to the call.
+    assert_eq!(count("x = if (a) { 1 } { 2 };", SyntaxKind::CallExpr), 1);
+    assert_eq!(count("x = Routine { 1 };", SyntaxKind::CallExpr), 1);
+    assert_eq!(
+        count("x = SynthDef(\\a, { 1 }).add;", SyntaxKind::CallExpr),
+        1
+    );
+}
+
+#[test]
+fn two_blocks_of_real_code_keep_their_own_boundaries() {
+    // The shape that reported this: a pattern, then a SynthDef, with a blank
+    // line between. Both have to be their own top-level node or an editor
+    // cannot evaluate one without the other.
+    let src = "(\nPbind(\\degree, 1).play;\n)\n\n(\nSynthDef(\\a, { 1 }).add;\n)\n";
+    let root = parse(src);
+    let top: Vec<SyntaxKind> = root
+        .root
+        .children
+        .iter()
+        .filter_map(|c| match c {
+            Child::Node(n) => Some(n.kind),
+            Child::Token(_) => None,
+        })
+        .collect();
+
+    assert_eq!(
+        top,
+        vec![SyntaxKind::ParenExpr, SyntaxKind::ParenExpr],
+        "each block must be its own top-level node"
+    );
+    assert_lossless(src);
+}

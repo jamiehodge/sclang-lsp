@@ -522,6 +522,23 @@ fn unary_expr(p: &mut Parser) -> Option<CompletedMarker> {
 
 /// A primary expression followed by any number of `.name(...)`, `[i]`, `(...)`
 /// or trailing blocks.
+/// Whether an expression may be followed by a parenthesised argument list.
+///
+/// `name '(' … ')'` and `classname '(' … ')'` are the only call forms in
+/// `lang11d` whose callee is not reached through a `.`.
+fn takes_arguments(kind: SyntaxKind) -> bool {
+    matches!(kind, NameRef | ClassRef)
+}
+
+/// Whether an expression may be followed by a trailing `{ }` block.
+///
+/// The same callees, plus a call that already has one: the grammar puts the
+/// `blocklist` on the whole production, so `if(a) { } { }` attaches both blocks
+/// to the call rather than to `if`.
+fn takes_block(kind: SyntaxKind) -> bool {
+    matches!(kind, NameRef | ClassRef | CallExpr | MethodCall)
+}
+
 fn postfix_expr(p: &mut Parser) -> Option<CompletedMarker> {
     let mut expr = primary_expr(p)?;
     loop {
@@ -552,8 +569,23 @@ fn postfix_expr(p: &mut Parser) -> Option<CompletedMarker> {
                     expr = m.complete(p, MethodCall);
                 }
             }
-            // `foo(args)` or `foo { }`
-            LParen | LBrace | BeginClosedFunc => {
+            // `foo(args)`. `lang11d` has no `expr '(' arglist ')'` production:
+            // a call's callee is a `name` or a `classname`, never an arbitrary
+            // expression. Allowing it here merged two adjacent top-level
+            // blocks — `( … )` then `( … )` on the next line — into a single
+            // call, which is exactly what sclang rejects with "unexpected '('".
+            //
+            // The one form the grammar does allow, `'(' binop2 ')' '(' … ')'`,
+            // is not parsed here anyway: `(+)` does not get past `paren_expr`.
+            LParen if takes_arguments(expr.kind()) => {
+                let m = expr.precede(p);
+                arg_list(p);
+                expr = m.complete(p, CallExpr);
+            }
+            // `foo { }`, and the trailing blocks that follow a call —
+            // `if(a) { } { }`, where the grammar attaches a `blocklist` to the
+            // whole `name '(' … ')'` production rather than to the name.
+            LBrace | BeginClosedFunc if takes_block(expr.kind()) => {
                 let m = expr.precede(p);
                 arg_list(p);
                 expr = m.complete(p, CallExpr);
