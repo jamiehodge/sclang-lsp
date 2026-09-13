@@ -3,6 +3,29 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## Unreleased
+
+### Fixed
+
+- **A file with no trailing newline evaluated whole instead of block by
+  block.** The selection-range chain offered a step for the file itself, and a
+  file that happens to begin with `(` and end with `)` — two regions stacked
+  up, with no newline after the last one — is indistinguishable at that step
+  from one enormous region. The extension takes the outermost `( … )` in the
+  chain, so ⌘⏎ anywhere in such a file ran every region at once: the SynthDef,
+  the Synth, and every pattern.
+
+  The parentheses were never required to pair up. In a file starting `(` on
+  line 1 and ending `)` on the last line, the opening one is closed long
+  before.
+
+  The file's range is no longer a step, because a file is a sequence of
+  expressions rather than one. When the text really is a single expression the
+  two coincide and the step stays, so a buffer holding exactly one `( … )`
+  still evaluates, and expand-selection still reaches all of a call that fills
+  the file. That second case is why the fix is here rather than in the
+  extension: from the chain alone those ranges are identical.
+
 ## [0.7.1] — 2026-09-13
 
 ### Fixed

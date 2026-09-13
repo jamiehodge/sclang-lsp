@@ -798,8 +798,10 @@ fn selection_range_widens_to_the_enclosing_block() {
         Range::new(Position::new(1, 11), Position::new(1, 14)),
         "innermost should be `440`: {widths:?}"
     );
-    // Outermost is the whole file; the one below it is the `( ... )` block.
-    let block = widths[widths.len() - 2];
+    // Outermost is the `( … )` block. The file itself is not a step: it is a
+    // sequence of expressions rather than one, and a step covering it is
+    // indistinguishable from a region to anything reading the chain back.
+    let block = widths[widths.len() - 1];
     assert_eq!(
         block,
         Range::new(Position::new(0, 0), Position::new(2, 1)),
@@ -824,11 +826,85 @@ fn selection_range_ignores_parens_inside_strings_and_comments() {
     );
 
     let widths = chain(&ranges[0]);
-    let block = widths[widths.len() - 2];
+    let block = widths[widths.len() - 1];
     assert_eq!(
         block,
         Range::new(Position::new(0, 0), Position::new(3, 1)),
         "the block runs to the real `)`, not the one in the string: {widths:?}"
+    );
+}
+
+#[test]
+fn a_file_that_merely_begins_and_ends_with_parens_is_not_one_block() {
+    // Two regions and no trailing newline, so the file's own text starts with
+    // `(` and ends with `)` — but they are not a pair, and the block a user
+    // means to evaluate is the one the cursor is in. Offering a step for the
+    // file made the outermost `( … )` in the chain the whole buffer, so ⌘⏎
+    // ran every region at once.
+    let mut h = Harness::start("selrange-whole", &mini_library());
+    let uri = h.open("Two.scd", "(\na;\n)\n\n(\nb;\n)");
+
+    let ranges: Vec<SelectionRange> = h.request(
+        "textDocument/selectionRange",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "positions": [{ "line": 5, "character": 0 }],
+        }),
+    );
+
+    let widths = chain(&ranges[0]);
+    assert_eq!(
+        widths[widths.len() - 1],
+        Range::new(Position::new(4, 0), Position::new(6, 1)),
+        "the outermost step should be the second region, not the file: {widths:?}"
+    );
+}
+
+#[test]
+fn a_file_that_is_exactly_one_block_still_offers_it() {
+    // The other side of the same rule. Here the file's range and the block's
+    // range are the same bytes, so dropping one would drop the other — and
+    // there would be no region to evaluate at all.
+    let mut h = Harness::start("selrange-only", &mini_library());
+    let uri = h.open("One.scd", "(\n\tSinOsc.ar(440);\n)");
+
+    let ranges: Vec<SelectionRange> = h.request(
+        "textDocument/selectionRange",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "positions": [{ "line": 1, "character": 11 }],
+        }),
+    );
+
+    let widths = chain(&ranges[0]);
+    assert_eq!(
+        widths[widths.len() - 1],
+        Range::new(Position::new(0, 0), Position::new(2, 1)),
+        "the block fills the file, so it is still the outermost step: {widths:?}"
+    );
+}
+
+#[test]
+fn an_expression_filling_the_file_is_still_selectable() {
+    // Not a region, but still one expression, and expand-selection should
+    // reach all of it. This is the case a fix in the extension would have
+    // broken: it cannot tell this range from the one above.
+    let mut h = Harness::start("selrange-expr", &mini_library());
+    let uri = h.open("Call.scd", "SinOsc.ar(\n\t440\n)");
+
+    let ranges: Vec<SelectionRange> = h.request(
+        "textDocument/selectionRange",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "positions": [{ "line": 1, "character": 2 }],
+        }),
+    );
+
+    let widths = chain(&ranges[0]);
+    assert_eq!(
+        widths[widths.len() - 1],
+        Range::new(Position::new(0, 0), Position::new(2, 1)),
+        "the whole call should still be reachable: {widths:?}"
     );
 }
 

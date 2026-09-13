@@ -11,7 +11,7 @@
 use crate::documents::Document;
 use crate::line_index::PositionEncoding;
 use lsp_types::{Position, SelectionRange};
-use sclang_syntax::{Child, SyntaxNode};
+use sclang_syntax::{Child, SyntaxKind, SyntaxNode};
 
 pub fn selection_ranges(
     doc: &Document,
@@ -33,11 +33,29 @@ pub fn selection_ranges(
 /// Consecutive duplicates are dropped: a CST node that wraps a single child
 /// spans exactly the same text, and emitting both would make one press of
 /// expand-selection appear to do nothing.
+///
+/// The file's own range is dropped too, unless the file *is* an expression.
+/// A buffer is not one — it is a sequence of them — and a step covering it is
+/// indistinguishable, to anything reading the chain back, from a step covering
+/// a region. That matters because the parentheses are not required to pair up:
+/// a file beginning with `(` on line 1 and ending with `)` on the last line
+/// with no trailing newline reads as one enormous `( … )`, and the block a
+/// user meant to evaluate is the one *inside* it. When the text really is a
+/// single expression — `( … )` filling the buffer — the two coincide and the
+/// step stays, because then it is the region.
 fn ancestors(root: &SyntaxNode, offset: u32) -> Vec<(u32, u32)> {
+    let whole = (root.start, root.end);
     let mut out: Vec<(u32, u32)> = Vec::new();
     let mut node = root;
+    let mut whole_is_expression = false;
 
     loop {
+        // Every node sharing the root's range is on the way down from it, so
+        // one pass sees all of them. `SourceFile` and `ExprSeq` are the two
+        // that only ever wrap.
+        if (node.start, node.end) == whole && !only_wraps(node.kind) {
+            whole_is_expression = true;
+        }
         push(&mut out, (node.start, node.end));
 
         match descend(node, offset) {
@@ -56,7 +74,19 @@ fn ancestors(root: &SyntaxNode, offset: u32) -> Vec<(u32, u32)> {
         }
     }
 
+    // Never leave the chain empty: with nothing else to offer, the file is
+    // still a better answer than no answer.
+    if !whole_is_expression && out.len() > 1 {
+        out.remove(0);
+    }
+
     out
+}
+
+/// Kinds that exist only to hold other nodes, and so never describe a region
+/// a user would want selected in their own right.
+fn only_wraps(kind: SyntaxKind) -> bool {
+    matches!(kind, SyntaxKind::SourceFile | SyntaxKind::ExprSeq)
 }
 
 fn push(out: &mut Vec<(u32, u32)>, range: (u32, u32)) {

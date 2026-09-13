@@ -163,6 +163,13 @@ answered by the standard `textDocument/selectionRange`. Counting parentheses in
 the extension would be the alternative, and it is wrong on `"("`, `$(`, `'('`
 and `// (`.
 
+The chain has one rule that is easy to miss: the file's own range is not a
+step. A file is a sequence of expressions rather than one, and a step covering
+it cannot be told apart from a step covering a region — the parentheses at
+either end of a buffer are not required to pair up, and in a file that opens
+with `(` on line 1 and ends with `)` on the last, they do not. Where the text
+really is a single expression the two coincide and the step stays.
+
 This also removes a whole category of failure that the two-tier design had to
 legislate against: nothing in the server can block on a live image, because
 nothing in it talks to one.
