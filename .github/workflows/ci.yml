@@ -63,10 +63,18 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: editors/vscode/package-lock.json
-      # Typecheck only. The extension is a thin client, and what it mostly has
-      # to get right — the shape of what it sends the server — is already
-      # covered by the protocol tests on the Rust side.
       - run: npm ci
         working-directory: editors/vscode
+
+      # Typecheck, then the unit tests. The extension is no longer a thin
+      # client: it owns an sclang, and the two pieces of real logic in it —
+      # picking the region to evaluate, and reading sclang's error format —
+      # are testable without an editor and are covered here.
+      #
+      # `npm run e2e` is not run. Half of it needs a built server and the other
+      # half a SuperCollider install, so it belongs on a developer's machine
+      # rather than in this job.
       - run: npm run compile
+        working-directory: editors/vscode
+      - run: npm test
         working-directory: editors/vscode
