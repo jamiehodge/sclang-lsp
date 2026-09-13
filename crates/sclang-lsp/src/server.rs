@@ -235,6 +235,19 @@ impl Server {
                         features::symbols::document_symbols(&uri, doc, s.enc),
                     ))
                 }),
+            request::SemanticTokensFullRequest::METHOD => self
+                .handle::<request::SemanticTokensFullRequest>(req, |s, p| {
+                    let doc = s.docs.get(&p.text_document.uri)?;
+                    Some(features::semantic_tokens::semantic_tokens(doc, s.enc).into())
+                }),
+            request::SemanticTokensRangeRequest::METHOD => self
+                .handle::<request::SemanticTokensRangeRequest>(req, |s, p| {
+                    let doc = s.docs.get(&p.text_document.uri)?;
+                    Some(
+                        features::semantic_tokens::semantic_tokens_range(doc, p.range, s.enc)
+                            .into(),
+                    )
+                }),
             request::SelectionRangeRequest::METHOD => self
                 .handle::<request::SelectionRangeRequest>(req, |s, p| {
                     let doc = s.docs.get(&p.text_document.uri)?;
@@ -588,6 +601,20 @@ pub fn capabilities(enc: PositionEncoding) -> ServerCapabilities {
             prepare_provider: Some(true),
             work_done_progress_options: Default::default(),
         })),
+        // Colour from the parse tree. Offered unconditionally: a client that
+        // does not consume semantic tokens simply never asks, and one that
+        // also has a grammar layers these over it rather than replacing it.
+        semantic_tokens_provider: Some(
+            SemanticTokensOptions {
+                legend: features::semantic_tokens::legend(),
+                full: Some(SemanticTokensFullOptions::Bool(true)),
+                // A client painting a long class-library file asks for the
+                // viewport before it asks for the rest.
+                range: Some(true),
+                work_done_progress_options: Default::default(),
+            }
+            .into(),
+        ),
         selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
         workspace_symbol_provider: Some(OneOf::Left(true)),

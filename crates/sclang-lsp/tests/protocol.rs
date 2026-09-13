@@ -263,7 +263,7 @@ fn closing_a_buffer_falls_back_to_what_is_on_disk() {
 #[test]
 fn an_unknown_request_is_an_error_not_a_crash() {
     let mut h = Harness::start("unknown", &mini_library());
-    let id = h.send_request("textDocument/semanticTokens/full", serde_json::json!({}));
+    let id = h.send_request("textDocument/documentHighlight", serde_json::json!({}));
     let response = h.await_response(id);
     assert!(response.error.is_some());
 
@@ -443,6 +443,83 @@ fn no_inlay_hints_when_the_receiver_is_unknown() {
         hints.is_empty(),
         "labelling these would be a guess: {hints:?}"
     );
+}
+
+#[test]
+fn semantic_tokens_describe_a_document_over_the_wire() {
+    let mut h = Harness::start("semtok", &mini_library());
+    let uri = h.open("Test.scd", "// osc\nSinOsc.ar(freq: 440)\n");
+    let _ = h.await_diagnostics(&uri);
+
+    let tokens: SemanticTokens = h.request(
+        "textDocument/semanticTokens/full",
+        serde_json::json!({ "textDocument": { "uri": uri } }),
+    );
+
+    assert_eq!(
+        decode_tokens(&h, &tokens),
+        vec![
+            (0, 0, 6, "comment"),
+            (1, 0, 6, "class"),
+            (1, 7, 2, "method"),
+            // The keyword argument names a parameter; a grammar matching on
+            // shape alone has nothing to tell it from a variable.
+            (1, 10, 5, "parameter"),
+            (1, 16, 3, "number"),
+        ]
+    );
+}
+
+#[test]
+fn semantic_tokens_can_be_asked_for_one_range() {
+    let mut h = Harness::start("semtok-range", &mini_library());
+    let uri = h.open("Two.sc", "Foo : Object { }\nBar : Object { }\n");
+    let _ = h.await_diagnostics(&uri);
+
+    let tokens: SemanticTokens = h.request(
+        "textDocument/semanticTokens/range",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": 1, "character": 0 },
+                "end": { "line": 2, "character": 0 },
+            },
+        }),
+    );
+
+    assert_eq!(
+        decode_tokens(&h, &tokens),
+        vec![(1, 0, 3, "class"), (1, 6, 6, "class")]
+    );
+}
+
+/// Undo the delta encoding the way a client does: against the legend the
+/// server advertised, not against anything this crate knows privately.
+fn decode_tokens<'a>(h: &'a Harness, tokens: &SemanticTokens) -> Vec<(u32, u32, u32, &'a str)> {
+    let legend = match &h.capabilities.semantic_tokens_provider {
+        Some(SemanticTokensServerCapabilities::SemanticTokensOptions(options)) => &options.legend,
+        other => panic!("semantic tokens were not advertised: {other:?}"),
+    };
+
+    let (mut line, mut character) = (0, 0);
+    tokens
+        .data
+        .iter()
+        .map(|t| {
+            line += t.delta_line;
+            character = if t.delta_line == 0 {
+                character + t.delta_start
+            } else {
+                t.delta_start
+            };
+            (
+                line,
+                character,
+                t.length,
+                legend.token_types[t.token_type as usize].as_str(),
+            )
+        })
+        .collect()
 }
 
 #[test]

@@ -57,7 +57,7 @@ pub struct Local {
 /// `PyrLexer.cpp` returns these as plain identifiers — there is no token kind
 /// for them — so nothing else in this crate would ever mention them, and a
 /// user typing `thi` should still be offered them.
-const PSEUDO_VARIABLES: &[&str] = &[
+pub const PSEUDO_VARIABLES: &[&str] = &[
     "this",
     "super",
     "thisProcess",
@@ -66,6 +66,44 @@ const PSEUDO_VARIABLES: &[&str] = &[
     "thisFunction",
     "thisFunctionDef",
 ];
+
+/// Whether a node opens a scope — somewhere names can be declared.
+///
+/// `cmdlinecode` lets a script declare variables in a top-level `( … )` block,
+/// or bare at the top of the file, and both are scopes like any function body.
+/// Without them, the `var`s in the block someone is actually working in are
+/// invisible to completion, hover and goto.
+pub fn is_scope(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::MethodDef
+            | SyntaxKind::FunctionBlock
+            | SyntaxKind::ParenExpr
+            | SyntaxKind::SourceFile
+            | SyntaxKind::ClassDef
+            | SyntaxKind::ClassExtension
+    )
+}
+
+/// The names one scope node declares, in source order.
+///
+/// [`locals_at`] walks outwards from a point and accumulates these; a walk
+/// going the other way — down the tree, colouring as it goes — needs the same
+/// collection one node at a time.
+pub fn declared_in(node: &SyntaxNode, source: &str) -> Vec<Local> {
+    let mut out = Vec::new();
+    match node.kind {
+        SyntaxKind::MethodDef
+        | SyntaxKind::FunctionBlock
+        | SyntaxKind::ParenExpr
+        | SyntaxKind::SourceFile => collect_declarations(node, source, &mut out),
+        SyntaxKind::ClassDef | SyntaxKind::ClassExtension => {
+            collect_class_slots(node, source, &mut out)
+        }
+        _ => {}
+    }
+    out
+}
 
 /// Every name visible at `offset`, innermost scope first.
 ///
@@ -78,22 +116,8 @@ pub fn locals_at(root: &SyntaxNode, source: &str, offset: u32) -> Vec<Local> {
     // Outermost first from the walk, so reverse to put the innermost scope —
     // the one whose declarations shadow — at the front.
     for node in ancestors_at(root, offset).into_iter().rev() {
-        match node.kind {
-            // `cmdlinecode` lets a script declare variables in a top-level
-            // `( … )` block, or bare at the top of the file, and both are
-            // scopes like any function body. Without these, the `var`s in the
-            // block someone is actually working in are invisible to
-            // completion, hover and goto.
-            SyntaxKind::MethodDef
-            | SyntaxKind::FunctionBlock
-            | SyntaxKind::ParenExpr
-            | SyntaxKind::SourceFile => {
-                collect_declarations(node, source, &mut out);
-            }
-            SyntaxKind::ClassDef | SyntaxKind::ClassExtension => {
-                collect_class_slots(node, source, &mut out);
-            }
-            _ => {}
+        for local in declared_in(node, source) {
+            push_unique(&mut out, local);
         }
     }
 

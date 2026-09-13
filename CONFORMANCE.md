@@ -247,6 +247,30 @@ in the grammar is `INTEGER | '-' INTEGER`, which the adverb rule did not honour
 treats as spaces while treating `±` as part of a name. Every snippet sclang
 accepts now parses here.
 
+The corpus has a second consumer, `crates/sclang-lsp/examples/token_sweep.rs`.
+It builds semantic tokens for every snippet in both position encodings and
+checks that they come out ordered, single-line, and landing on the source text
+they claim. That is an encoding property rather than a conformance one, but the
+corpus is what makes it worth asserting: a wrong offset produces no error
+anywhere, only colour sliding down the file.
+
+Like the oracles, it is a developer-machine tool — the corpus is generated
+rather than committed. The same properties are asserted in CI by
+`features::semantic_tokens::tokens_are_well_formed_on_awkward_input`, over
+inputs the repository does carry.
+
+```bash
+cargo run --release --example token_sweep -- \
+  oracle/scd-corpus \
+  /Applications/SuperCollider.app/Contents/Resources/SCClassLibrary
+```
+
+```
+files swept       : 5,465
+tokens            : 546,358
+not valid UTF-8   : 2 (skipped)
+```
+
 ### What it does not check
 
 

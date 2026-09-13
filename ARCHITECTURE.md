@@ -73,6 +73,30 @@ exist.
    publishes them through `createDiagnosticCollection`, with no language server
    involved.
 
+## Colour
+
+Semantic tokens come from the buffer's own tree and **nothing else** — not the
+symbol index, not a running sclang. That is the constraint that shapes the
+feature.
+
+Resolving class names against the index would let a known class look different
+from an unknown one. It would also mean every open file changing colour part
+way through startup, when the background scan lands, for information the
+diagnostics already report properly. A colour that flickers is worse than a
+colour that is merely coarse.
+
+What the tree does settle is settled: `foo` in `x.foo` is a method, `foo` in
+`foo(a)` is also a method — sclang reads it as `a.foo` — and a name declared as
+`arg` is a parameter at every later use, through shadowing. None of that is
+reachable from shape alone, which is what an editor's own grammar has.
+
+The tokens are emitted for *every* lexeme, comments and literals included,
+rather than only the semantic ones. A client with a grammar sets
+`augmentsSyntaxTokens` and layers ours on top, so the overlap costs nothing;
+a client without one gets highlighting it otherwise has no source for. That is
+also why the capability is advertised unconditionally rather than per editor:
+a client that does not consume semantic tokens never sends the request.
+
 ## Documents
 
 The server owns text: real incremental edits, version tracking, and the buffer
@@ -152,9 +176,13 @@ statement about the shipped binary.
 - **No linking `sc_lexer`.** Upstream's lexer is used as a *test oracle*, not a
   dependency, so the crate stays pure Rust and cross-compiles without a C++
   toolchain. Their C++ API is newer and moves faster than the language does.
-- **No tree-sitter.** It remains the right tool for editor highlighting, and
-  the grammar work done separately is worth upstreaming, but a language server
-  wants a parser it controls.
+- **No tree-sitter.** A language server wants a parser it controls, and the one
+  here already knows more than a grammar can: which lowercase word is a
+  selector, which is a parameter, and which is a local. That knowledge reaches
+  the editor as semantic tokens instead — see *Colour* below. Tree-sitter is
+  still the right answer for a client that consumes no semantic tokens, and
+  that grammar work is worth upstreaming, but it is no longer the only way an
+  editor can colour SuperCollider correctly.
 
 ## Open threads
 

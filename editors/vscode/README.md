@@ -3,9 +3,10 @@
 Language features for SuperCollider, and an sclang to run your code in.
 
 **Reading code** — completion that knows the class library, hover with real
-signatures, goto-definition, find-references, rename, symbols, inlay hints, and
-syntax errors as you type. All of it comes from parsing, so it works on code
-that does not compile and while sclang is busy.
+signatures, goto-definition, find-references, rename, symbols, inlay hints,
+parse-accurate syntax colouring, and syntax errors as you type. All of it comes
+from parsing, so it works on code that does not compile and while sclang is
+busy.
 
 **Running code** — evaluate a selection, a block or a line; watch the post
 window; and see class-library compile errors in the Problems panel.
@@ -150,3 +151,9 @@ GPL-3.0-or-later, matching the server.
 `language-configuration.json` and `syntaxes/supercollider.tmLanguage.json` are
 taken from [`vscode-supercollider`](https://github.com/scztt/vscode-supercollider),
 MIT © 2022 Scott Carver. See [LICENSE-MIT](LICENSE-MIT).
+
+The grammar still does the first pass — it is synchronous, and it paints before
+the server has started. The server's semantic tokens arrive after and refine
+it, which is what tells a selector from a variable and a parameter from a
+local. VS Code layers the two by default; `editor.semanticHighlighting.enabled`
+turns the second one off.

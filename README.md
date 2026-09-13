@@ -27,6 +27,7 @@ installed at all. It never starts sclang and never talks to one.
 | **Find references** | Exact for a local or a class name; textual for a selector, since dispatch is dynamic |
 | **Rename** | Function locals and class names — everything whose uses can be enumerated completely |
 | **Inlay hints** | The parameter each positional argument fills |
+| **Semantic tokens** | Colour from the parse tree: a selector is a method, a name declared as `arg` stays a parameter wherever it appears |
 | **Symbols** | Classes with their methods nested, and across the workspace |
 | **Selection ranges** | Expand-selection, following the real syntax |
 
@@ -98,8 +99,9 @@ vim.lsp.enable("sclang_lsp")
 (add-hook 'sclang-mode-hook #'eglot-ensure)
 ```
 
-**Helix**, in `~/.config/helix/languages.toml`. Omitting `grammar` means no
-syntax highlighting, since Helix ships no SuperCollider grammar:
+**Helix**, in `~/.config/helix/languages.toml`. There is no `grammar` entry
+because Helix ships no SuperCollider tree-sitter grammar; what colour you get
+depends on whether your Helix build consumes semantic tokens:
 
 ```toml
 [language-server.sclang-lsp]
@@ -115,6 +117,10 @@ language-servers = ["sclang-lsp"]
 
 Only the VS Code path is exercised here; the three snippets above are offered
 untested, and corrections are welcome.
+
+Syntax colouring needs nothing set up. The server offers semantic tokens to
+every client, and a client that does not consume them simply never asks; one
+that has a grammar of its own layers ours over it rather than replacing it.
 
 The class library is found automatically, along with `Extensions` and
 `downloaded-quarks`. To point somewhere else — a non-standard install, or a
@@ -160,7 +166,8 @@ program.
 nothing static can enumerate them. This is the one real capability given up by
 never contacting sclang, and it is worth the exchange.
 
-No SCDoc rendering, no semantic tokens, no document highlight yet.
+No SCDoc rendering, no document highlight, and no `semanticTokens/full/delta`
+yet.
 
 ## Why you can trust it
 

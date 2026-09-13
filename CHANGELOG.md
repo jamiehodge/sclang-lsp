@@ -3,6 +3,35 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## Unreleased
+
+### Added
+
+- **Semantic tokens**, `full` and `range`. Colour now comes from the parse tree
+  rather than only from the editor's own grammar, which has to guess from shape
+  alone: a lowercase word is a variable, a capitalised one is a class. The tree
+  knows better. `blend` in `x.blend(1)` is a method; `foo` in `foo(a)` is also
+  a method, because sclang reads it as `a.foo`; a name declared as `arg` stays
+  a parameter at every later use, through shadowing; and `~out` is one token
+  including its tilde.
+
+  Nothing consults the symbol index, so colour does not change when the class
+  library scan lands — a flicker would cost more than the extra precision is
+  worth. Every lexeme is emitted, comments and literals included, so a client
+  with no SuperCollider grammar gets highlighting it otherwise has no source
+  for; one with a grammar layers these over it.
+
+  The delta encoding fails silently — a wrong offset raises nothing anywhere,
+  it just slides colour down the file — so it is checked as a property rather
+  than by example: every token in order, on one line, and landing on the source
+  it claims. In CI that runs over committed inputs; `examples/token_sweep.rs`
+  runs the same checks over a real class library and the help-file corpus,
+  where it clears 5,465 files and 546,358 tokens.
+
+  No `full/delta`. It needs the server to remember the array it last sent for
+  each document, to save re-sending a payload that takes well under a
+  millisecond to rebuild.
+
 ## [0.6.2] — 2026-09-13
 
 ### Fixed

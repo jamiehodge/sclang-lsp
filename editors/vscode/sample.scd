@@ -93,7 +93,19 @@ SinOsc.ar(440);
 // Classes with their methods nested underneath. Try it on any .sc file in the
 // class library.
 
-// ── 10. Diagnostics ─────────────────────────────────────────────────────
+// ── 10. Colour ──────────────────────────────────────────────────────────
+// Nothing to press. The colouring below comes from the parse tree, layered
+// over the TextMate grammar, and it knows three things the grammar cannot:
+//
+//   `blend` is a method, not a variable that happens to be lowercase;
+//   `freq` stays a parameter where it is used, not just where it is declared;
+//   `rate` is a plain name, because nothing declares it.
+{ |freq|
+	var rate = freq * 2;
+	freq.blend(rate, 0.5);
+};
+
+// ── 11. Diagnostics ─────────────────────────────────────────────────────
 // Reported as you type rather than on save, and on a buffer that has never
 // been written to disk. The call below is missing its closing paren; add one
 // and the squiggle goes.

@@ -19,6 +19,10 @@ pub struct Harness {
     thread: Option<std::thread::JoinHandle<()>>,
     next_id: i32,
     pub dir: PathBuf,
+    /// What the server advertised at `initialize`. A client keeps these for
+    /// the life of the session, so a test that decodes a response should use
+    /// them rather than anything the crate knows privately.
+    pub capabilities: ServerCapabilities,
 }
 
 impl Harness {
@@ -46,8 +50,9 @@ impl Harness {
             thread: Some(thread),
             next_id: 0,
             dir,
+            capabilities: ServerCapabilities::default(),
         };
-        h.initialize();
+        h.capabilities = h.initialize().capabilities;
         h
     }
 
