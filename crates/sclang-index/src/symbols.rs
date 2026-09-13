@@ -125,8 +125,9 @@ pub struct Var {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Class {
     pub name: String,
-    /// `None` for `Object`, and for any class whose superclass is left
-    /// implicit in the source.
+    /// `None` only for `Object`, which is the one real root. A class written
+    /// without `: Super` is recorded as inheriting `Object`, because that is
+    /// what sclang resolves it to.
     pub superclass: Option<String>,
     /// The `[slot]` of an indexed class definition, e.g. `Array[slot]`.
     pub indexed_slot: Option<String>,

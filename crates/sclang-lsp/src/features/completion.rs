@@ -9,7 +9,7 @@ use crate::analysis::{call_at, resolve_selector, token_at, Bias, Receiver};
 use crate::documents::Document;
 use crate::scope::{locals_at, Local, LocalKind};
 use sclang_index::{Method, MethodKind, SymbolIndex};
-use sclang_syntax::{Child, SyntaxKind, SyntaxNode};
+use sclang_syntax::{SyntaxKind, SyntaxNode};
 
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionList, CompletionResponse, Documentation,
@@ -95,13 +95,7 @@ pub fn context_at(root: &SyntaxNode, source: &str, offset: u32) -> Context {
 /// The receiver node immediately left of an offset within a call.
 fn receiver_before(call: &SyntaxNode, before: u32, source: &str) -> Receiver {
     let node = call.children.iter().rev().find(|c| c.range().1 <= before);
-    match node {
-        Some(Child::Node(n)) if n.kind == SyntaxKind::ClassRef => n
-            .token_of(SyntaxKind::ClassName)
-            .map(|t| Receiver::Class(t.text(source).to_string()))
-            .unwrap_or(Receiver::Unknown),
-        _ => Receiver::Unknown,
-    }
+    crate::analysis::receiver_from(node, source)
 }
 
 pub fn completion(doc: &Document, index: &SymbolIndex, offset: u32) -> CompletionResponse {
@@ -127,6 +121,21 @@ pub fn completion(doc: &Document, index: &SymbolIndex, offset: u32) -> Completio
                 let mut methods = index.methods_visible_on(&name, MethodKind::Class);
                 methods.extend(index.methods_visible_on("Class", MethodKind::Instance));
                 for m in methods {
+                    if !m.name.starts_with(&prefix) {
+                        continue;
+                    }
+                    if items.len() >= LIMIT {
+                        truncated = true;
+                        break;
+                    }
+                    items.push(method_item(m, Some(&name)));
+                }
+            }
+            // An instance answers instance-side methods, its superclasses'
+            // included. This is the difference between `Pbind(...).p` offering
+            // Pbind's own `play`, and offering every `play` in the image.
+            Receiver::Instance(name) => {
+                for m in index.methods_visible_on(&name, MethodKind::Instance) {
                     if !m.name.starts_with(&prefix) {
                         continue;
                     }

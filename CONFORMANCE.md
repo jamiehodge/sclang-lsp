@@ -149,6 +149,61 @@ would give a full parse tree, but nothing in sclang ever calls `dump()` — no
 flag, no primitive, no caller — so reaching it would mean patching and
 rebuilding SuperCollider.
 
+### Resolution: against sclang's own dispatch
+
+The symbol oracles above check that the right methods *exist*. This checks that
+the right one is *chosen*: given an instance of a class and a selector, does the
+server pick the method sclang would dispatch to?
+
+`findRespondingMethodFor` is sclang's own resolution — the call `Object` uses
+internally. It is static, needs no instance, and has no side effects, which is
+the only reason this oracle is possible: constructing one of every class would
+boot servers, open windows and throw.
+
+```bash
+./oracle/run-resolution.sh
+```
+
+```
+pairs compared   : 751,639
+agreed exactly   : 751,601 / 751,639 (99.9949%)
+resolved nothing : 38
+wrong owner      : 0
+```
+
+Every class, against every selector anywhere in its own superclass chain. **The
+walk never picks the wrong implementation.** The 38 gaps are all
+`+ SequenceableCollection` in a file that is not valid UTF-8 — the same
+known gap as everywhere else, and nothing the resolution does.
+
+Pass the class library roots as extra arguments if sclang loads quarks from
+outside the usual places; otherwise the comparison reports methods missing that
+were simply never indexed.
+
+**This oracle immediately earned itself.** The first run agreed on only 40% of
+pairs, all failures of the form "sclang says `Object`, we found no method".
+SuperCollider treats a class written without `: Super` as inheriting `Object`,
+and the index had recorded that as "no superclass" — a deliberate choice, on the
+grounds that the source does not say so. 215 classes in the stock library are
+written that way, `AbstractFunction` among them, so the chain from any UGen or
+any Pattern stopped before reaching `Object`. Completion after such a receiver
+had never offered `postln`.
+
+The symbol oracle could not have caught it: its superclass comparison skipped
+whenever *our* side had none, which is exactly the case in question. That
+accommodation is gone, and the check now reports 0 mismatches across 1,757
+classes meaningfully rather than by omission.
+
+### What it does not check
+
+That `Foo(...)` produces an instance of `Foo`. `Foo(...)` is `Foo.new(...)` by
+the grammar, and `*new` returns an instance of the class it was sent to — but by
+convention rather than by guarantee, since a class is free to return something
+else. Checking it would mean evaluating `new` on every class, which is exactly
+what this oracle is designed to avoid. It is used where a wrong answer costs a
+missing completion or a wrong jump, and deliberately not where one would render
+as though it were in the source.
+
 ## Parse-tree dump
 
 `DumpParseNode.cpp` has been in SuperCollider for years with no caller: no

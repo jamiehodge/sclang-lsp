@@ -143,13 +143,92 @@ fn descend<'a>(
 /// What a `.` is being sent to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Receiver {
-    /// A literal class name: `SinOsc.ar`. The one case where dispatch is
-    /// statically known, so completion and goto can be exact.
+    /// A literal class name: `SinOsc.ar`. A class-side send.
     Class(String),
+    /// An instance of a known class: `Pbind(...).play`, `"foo".reverse`.
+    ///
+    /// Not inference — see [`instance_class`] for what qualifies and how
+    /// certain each case is.
+    Instance(String),
     /// Anything else. SuperCollider is dynamically typed and this server does
     /// no inference, so the honest answer is every class defining the
     /// selector.
     Unknown,
+}
+
+/// The class an expression is known to produce, where that is knowable without
+/// inferring anything.
+///
+/// Two kinds of certainty here, and they are worth keeping apart when deciding
+/// what to do with the answer.
+///
+/// **The grammar decides it.** A string literal is a `String`, `[1, 2]` is an
+/// `Array`, `{ }` is a `Function`. Nothing can make these wrong.
+///
+/// **Convention decides it.** `Foo(...)` is `Foo.new(...)` — that desugaring is
+/// the language's, not a guess — and `*new` returns an instance of the class it
+/// was sent to, almost always via `super.new` or `super.newCopyArgs`. A class
+/// is free to return something else, and a few do, so this is overwhelmingly
+/// right rather than guaranteed. It is used where a wrong answer costs a
+/// missing completion or a wrong jump, and deliberately not where one would
+/// render as though it were in the source.
+pub fn instance_class(node: &SyntaxNode, source: &str) -> Option<String> {
+    match node.kind {
+        // `Foo(...)`, which the parser leaves as a call on a class reference.
+        SyntaxKind::CallExpr => class_named(node, source),
+
+        // `Foo.new(...)`, spelled out. Any other selector is unknown: only
+        // `new` has the convention behind it.
+        SyntaxKind::MethodCall => {
+            let selector = node.token_of(SyntaxKind::Ident)?;
+            if selector.text(source) == "new" {
+                class_named(node, source)
+            } else {
+                None
+            }
+        }
+
+        SyntaxKind::FunctionBlock => Some("Function".to_string()),
+        SyntaxKind::EventLiteral => Some("Event".to_string()),
+
+        // `Set[...]` names its own class; a bare `[...]` is an Array.
+        SyntaxKind::Collection => {
+            Some(class_named(node, source).unwrap_or_else(|| "Array".to_string()))
+        }
+        SyntaxKind::LiteralList => Some("Array".to_string()),
+
+        SyntaxKind::Literal => {
+            let token = node.child_tokens().find(|t| t.kind.is_literal())?;
+            Some(
+                match token.kind {
+                    SyntaxKind::String => "String",
+                    SyntaxKind::Integer | SyntaxKind::RadixInteger | SyntaxKind::HexInteger => {
+                        "Integer"
+                    }
+                    SyntaxKind::Float => "Float",
+                    SyntaxKind::Symbol => "Symbol",
+                    SyntaxKind::Char => "Char",
+                    // An accidental like `4s` is a degree, not a plain number,
+                    // and pinning it down is not worth being wrong about.
+                    _ => return None,
+                }
+                .to_string(),
+            )
+        }
+
+        _ => None,
+    }
+}
+
+/// The class name a node is built on: `Foo(...)`, `Foo.new`, `Set[...]`.
+fn class_named(node: &SyntaxNode, source: &str) -> Option<String> {
+    if let Some(reference) = node.child_of(SyntaxKind::ClassRef) {
+        if let Some(name) = reference.token_of(SyntaxKind::ClassName) {
+            return Some(name.text(source).to_string());
+        }
+    }
+    node.token_of(SyntaxKind::ClassName)
+        .map(|t| t.text(source).to_string())
 }
 
 /// The receiver of the method call a `.` token belongs to.
@@ -163,13 +242,25 @@ fn receiver_of(call: &SyntaxNode, dot_start: u32, source: &str) -> Receiver {
         .rev()
         .find(|c| c.range().1 <= dot_start);
 
-    match before {
-        Some(Child::Node(n)) if n.kind == SyntaxKind::ClassRef => n
+    receiver_from(before, source)
+}
+
+/// Turn the node left of a dot into a receiver.
+pub(crate) fn receiver_from(node: Option<&Child>, source: &str) -> Receiver {
+    let Some(Child::Node(n)) = node else {
+        return Receiver::Unknown;
+    };
+
+    if n.kind == SyntaxKind::ClassRef {
+        return n
             .token_of(SyntaxKind::ClassName)
             .map(|t| Receiver::Class(t.text(source).to_string()))
-            .unwrap_or(Receiver::Unknown),
-        _ => Receiver::Unknown,
+            .unwrap_or(Receiver::Unknown);
     }
+
+    instance_class(n, source)
+        .map(Receiver::Instance)
+        .unwrap_or(Receiver::Unknown)
 }
 
 /// A call the cursor is inside: its argument list and what it dispatches to.
@@ -359,6 +450,17 @@ pub fn resolve_selector<'a>(
             }
             Vec::new()
         }
+        // An instance answers instance-side methods, walking up its
+        // superclasses exactly as dispatch would. No class-side fallback:
+        // unlike a bare `Foo`, there is no chance this is a variable that
+        // merely looks like a class name.
+        Receiver::Instance(class) => index
+            .superclass_chain(class)
+            .into_iter()
+            .find_map(|c| index.method(&c.name, name, MethodKind::Instance))
+            .into_iter()
+            .collect(),
+
         Receiver::Unknown => index.implementors(name),
     }
 }
@@ -479,5 +581,85 @@ mod tests {
                 name: "freq".into()
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod receiver_tests {
+    use super::*;
+    use sclang_syntax::parse;
+
+    /// The receiver of the last `.` in the source.
+    fn receiver(source: &str) -> Receiver {
+        let parse = parse(source);
+        let dot = source.rfind('.').expect("a dot") as u32;
+        let call = parse
+            .root
+            .descendants()
+            .into_iter()
+            .rfind(|n| n.kind == SyntaxKind::MethodCall && n.start <= dot && dot < n.end)
+            .expect("a method call");
+        receiver_of(call, dot, source)
+    }
+
+    #[test]
+    fn a_class_name_is_a_class_receiver() {
+        assert_eq!(receiver("SinOsc.ar"), Receiver::Class("SinOsc".into()));
+    }
+
+    #[test]
+    fn constructing_a_class_gives_an_instance_of_it() {
+        // `Foo(...)` is `Foo.new(...)`, and this is the case that sends
+        // `Pbind(...).play` to `Pattern:play` rather than to every `play`.
+        assert_eq!(
+            receiver("Pbind(\\dur, 1).play"),
+            Receiver::Instance("Pbind".into())
+        );
+        assert_eq!(
+            receiver("Pbind.new(1).play"),
+            Receiver::Instance("Pbind".into())
+        );
+    }
+
+    #[test]
+    fn only_new_counts_as_construction() {
+        // `Foo.bar(...)` could return anything; nothing but `new` carries the
+        // convention.
+        assert_eq!(receiver("Buffer.alloc(s, 1).play"), Receiver::Unknown);
+    }
+
+    #[test]
+    fn literals_are_instances_of_the_class_the_grammar_gives_them() {
+        assert_eq!(
+            receiver("\"hi\".reverse"),
+            Receiver::Instance("String".into())
+        );
+        assert_eq!(receiver("[1, 2].sum"), Receiver::Instance("Array".into()));
+        assert_eq!(
+            receiver("{ 1 }.value"),
+            Receiver::Instance("Function".into())
+        );
+        assert_eq!(receiver("42.rand"), Receiver::Instance("Integer".into()));
+        assert_eq!(receiver("4.5.round"), Receiver::Instance("Float".into()));
+        assert_eq!(
+            receiver("\\sym.asString"),
+            Receiver::Instance("Symbol".into())
+        );
+        assert_eq!(receiver("$c.ascii"), Receiver::Instance("Char".into()));
+        assert_eq!(receiver("(a: 1).keys"), Receiver::Instance("Event".into()));
+    }
+
+    #[test]
+    fn a_variable_is_still_unknown() {
+        // The whole point of the restraint: nothing here infers a type.
+        assert_eq!(receiver("~pattern.play"), Receiver::Unknown);
+        assert_eq!(receiver("x.play"), Receiver::Unknown);
+    }
+
+    #[test]
+    fn construction_chains() {
+        // The receiver of the second dot is the whole `Pbind(...).play` call,
+        // whose class is not knowable — `play` may return anything.
+        assert_eq!(receiver("Pbind(1).play.stop"), Receiver::Unknown);
     }
 }

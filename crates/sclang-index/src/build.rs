@@ -53,11 +53,19 @@ fn class_def(
         return;
     };
 
-    let superclass = node.child_of(SyntaxKind::SuperClass).and_then(|s| {
-        s.child_tokens()
-            .find(|t| t.kind == SyntaxKind::ClassName)
-            .map(|t| t.text(source).to_string())
-    });
+    let superclass = node
+        .child_of(SyntaxKind::SuperClass)
+        .and_then(|s| {
+            s.child_tokens()
+                .find(|t| t.kind == SyntaxKind::ClassName)
+                .map(|t| t.text(source).to_string())
+        })
+        // `Foo { }` with no `: Super` inherits Object; sclang resolves it that
+        // way and reports `Object` for the 215 classes in the stock library
+        // written like that. Leaving it implicit here stops every superclass
+        // walk at such a class, which silently hides Object's methods from
+        // every class beneath it.
+        .or_else(|| (name != "Object").then(|| "Object".to_string()));
 
     let indexed_slot = node.child_of(SyntaxKind::IndexedSlot).and_then(|s| {
         s.child_tokens()

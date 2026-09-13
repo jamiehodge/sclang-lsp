@@ -3,6 +3,33 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## Unreleased
+
+### Fixed
+
+- **A class written without `: Super` now inherits `Object`.** SuperCollider
+  resolves it that way; the index had recorded it as having no superclass at
+  all, which stopped every superclass walk there. 215 classes in the stock
+  library are written like that, `AbstractFunction` among them — so the chain
+  from any UGen or any Pattern never reached `Object`, and completion on such a
+  receiver had never offered `postln`, `dump` or anything else Object defines.
+
+### Added
+
+- **Receivers narrow when the class is knowable.** `Pbind(...).play` resolves to
+  `Pattern:play` rather than to every `play` in the image, and `"x".reverse`,
+  `[1, 2].sum`, `{ }.value` and the other literal forms resolve on their own
+  class. Completion, hover, goto-definition and find-references use it.
+
+  Inlay hints and keyword-argument completion deliberately do not: those render
+  as though they were in the source, and `Foo(...)` being an instance of `Foo`
+  is convention rather than guarantee.
+
+- **A resolution oracle.** `./oracle/run-resolution.sh` asks sclang what its own
+  dispatch would select — via `findRespondingMethodFor` — for every class
+  against every selector in its superclass chain, and diffs 750,000 of those
+  against the server. It found the superclass bug above on its first run.
+
 ## [0.3.1] — 2026-09-13
 
 ### Fixed

@@ -7,3 +7,4 @@ editors/*/node_modules/
 editors/*/out/
 editors/*/*.vsix
 editors/vscode/server/
+oracle/oracle-resolution.tsv

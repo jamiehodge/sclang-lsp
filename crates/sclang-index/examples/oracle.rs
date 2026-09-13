@@ -98,9 +98,12 @@ fn main() {
         .classes
         .iter()
         .filter_map(|(name, sup)| {
-            let mine = index.class(name)?.superclass.as_deref()?;
-            // sclang resolves the implicit superclass the source leaves
-            // unwritten, so only compare where we recorded one.
+            // sclang writes `-` for the one class with no superclass, and so
+            // does the index. This used to skip whenever *we* had none, which
+            // made the check blind to the very thing it should have caught:
+            // for years the index left an unwritten superclass implicit, and
+            // every chain through such a class stopped short of Object.
+            let mine = index.class(name)?.superclass.as_deref().unwrap_or("-");
             (mine != sup).then(|| (name.clone(), sup.clone(), mine.to_string()))
         })
         .collect();

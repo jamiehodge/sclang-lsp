@@ -23,9 +23,34 @@ fn one(src: &str) -> SymbolIndex {
 fn classes_and_superclasses() {
     let ix = one("Foo : Bar { } Baz { }");
     assert_eq!(ix.class("Foo").unwrap().superclass.as_deref(), Some("Bar"));
-    // A class with no `:` has an implicit superclass, which the source does
-    // not state and the index does not invent.
-    assert_eq!(ix.class("Baz").unwrap().superclass, None);
+
+    // A class with no `:` inherits Object. This used to be recorded as `None`
+    // on the grounds that the source does not say so — but sclang resolves it
+    // to Object and reports it that way, and leaving it implicit stopped every
+    // superclass walk at such a class. 215 classes in the stock library are
+    // written like this, `AbstractFunction` among them, so the chain from any
+    // UGen or Pattern never reached Object at all.
+    assert_eq!(
+        ix.class("Baz").unwrap().superclass.as_deref(),
+        Some("Object")
+    );
+
+    // Object itself is the one real root.
+    let root = one("Object { } Thing : Object { }");
+    assert_eq!(root.class("Object").unwrap().superclass, None);
+}
+
+#[test]
+fn an_implicit_superclass_still_inherits() {
+    // The consequence that matters: methods on Object are visible from a class
+    // that never mentions it.
+    let ix = one("Object { postln { ^this } } Baz { }");
+    let visible = ix.methods_visible_on("Baz", sclang_index::MethodKind::Instance);
+    assert!(
+        visible.iter().any(|m| m.name == "postln"),
+        "Baz should inherit Object's methods: {:?}",
+        visible.iter().map(|m| &m.name).collect::<Vec<_>>()
+    );
 }
 
 #[test]
