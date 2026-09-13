@@ -2,7 +2,7 @@
   "name": "sclang-lsp",
   "displayName": "SuperCollider (sclang-lsp)",
   "description": "Language features for SuperCollider, and an sclang to run it in: evaluation, a post window, and class-library compile errors.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "license": "GPL-3.0-or-later",
   "publisher": "jamiehodge",
   "repository": {

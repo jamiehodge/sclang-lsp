@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/sclang-index","crates/sclang-lsp","crates/sclang-syntax"]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 # The toolchain CI lints with. Raising it should be a deliberate commit.
 rust-version = "1.98"
