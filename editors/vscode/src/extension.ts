@@ -157,7 +157,7 @@ function registerSclang(context: vscode.ExtensionContext): void {
                 return;
             }
 
-            const region = await regionAt(editor);
+            const region = await regionAt(editor, client);
             if (!region) {
                 return;
             }

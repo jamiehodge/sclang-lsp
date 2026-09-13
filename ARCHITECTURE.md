@@ -163,6 +163,12 @@ answered by the standard `textDocument/selectionRange`. Counting parentheses in
 the extension would be the alternative, and it is wrong on `"("`, `$(`, `'('`
 and `// (`.
 
+The extension asks the server for that chain directly, over the language
+client, rather than through `vscode.executeSelectionRangeProvider`. That
+command merges every registered provider with VS Code's own, which ends every
+chain with the whole buffer — so the editor would hand back a step the server
+deliberately does not offer, and the answer would be "evaluate the file".
+
 The chain has one rule that is easy to miss: the file's own range is not a
 step. A file is a sequence of expressions rather than one, and a step covering
 it cannot be told apart from a step covering a region — the parentheses at

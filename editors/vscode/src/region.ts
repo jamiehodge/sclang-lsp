@@ -3,8 +3,24 @@
 // The middle case is the only hard one, and it is a parsing question rather
 // than a text one. So the candidate ranges come from the language server's
 // `textDocument/selectionRange`, and `block.ts` picks one.
+//
+// The server is asked *directly* rather than through
+// `vscode.executeSelectionRangeProvider`. That command merges every registered
+// provider with VS Code's own `WordSelectionRangeProvider`, whose last
+// contribution is unconditionally `getFullModelRange()` — the whole buffer. In
+// a file that begins with `(` and ends with `)`, which is any file of stacked
+// regions with no trailing newline, that step is shaped exactly like a region,
+// and `pickBlock` takes the outermost one. So ⌘⏎ evaluated the entire file.
+//
+// Asking the client is also the more honest question: what is wanted here is
+// what the parser saw, not what every provider in the editor thinks.
 
 import * as vscode from 'vscode';
+import {
+    LanguageClient,
+    SelectionRange as ProtocolSelectionRange,
+    SelectionRangeRequest,
+} from 'vscode-languageclient/node';
 import { pickBlock, Step } from './block';
 
 export interface Region {
@@ -13,7 +29,10 @@ export interface Region {
     range: vscode.Range;
 }
 
-export async function regionAt(editor: vscode.TextEditor): Promise<Region | undefined> {
+export async function regionAt(
+    editor: vscode.TextEditor,
+    client: LanguageClient | undefined,
+): Promise<Region | undefined> {
     const doc = editor.document;
     const selection = editor.selection;
 
@@ -21,7 +40,7 @@ export async function regionAt(editor: vscode.TextEditor): Promise<Region | unde
         return { text: doc.getText(selection), range: selection };
     }
 
-    const block = await enclosingBlock(doc, selection.active);
+    const block = client && (await enclosingBlock(doc, selection.active, client));
     if (block) {
         return block;
     }
@@ -35,23 +54,34 @@ export async function regionAt(editor: vscode.TextEditor): Promise<Region | unde
 async function enclosingBlock(
     doc: vscode.TextDocument,
     position: vscode.Position,
+    client: LanguageClient,
 ): Promise<Region | undefined> {
-    const chains = await vscode.commands.executeCommand<vscode.SelectionRange[]>(
-        'vscode.executeSelectionRangeProvider',
-        doc.uri,
-        [position],
-    );
+    // Positions go over as they are: the client advertises `utf-16` as the
+    // only encoding it accepts, so the server is already speaking VS Code's.
+    const chain = await client
+        .sendRequest(SelectionRangeRequest.type, {
+            textDocument: { uri: doc.uri.toString() },
+            positions: [{ line: position.line, character: position.character }],
+        })
+        // A server that is starting, stopping or gone answers nothing.
+        // Blocks are its contribution, so the caller falls back to the line.
+        .catch(() => undefined);
 
-    // No provider means the language server is not running. Blocks are its
-    // contribution; without it the caller falls back to the current line.
-    if (!chains?.length) {
+    if (!chain?.length) {
         return undefined;
     }
 
     // Flatten the parent links into the innermost-first list `pickBlock` wants.
     const ranges: vscode.Range[] = [];
-    for (let node: vscode.SelectionRange | undefined = chains[0]; node; node = node.parent) {
-        ranges.push(node.range);
+    for (let node: ProtocolSelectionRange | undefined = chain[0]; node; node = node.parent) {
+        ranges.push(
+            new vscode.Range(
+                node.range.start.line,
+                node.range.start.character,
+                node.range.end.line,
+                node.range.end.character,
+            ),
+        );
     }
 
     const steps: Step[] = ranges.map((range) => ({

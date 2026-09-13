@@ -135,6 +135,24 @@ async function main() {
             at: [2, 2],
             expect: '(\n(\n\t1 + 2;\n);\n)',
         },
+        {
+            // Stacked regions and no trailing newline, so the file's own text
+            // begins with `(` and ends with `)` without the two being a pair.
+            // A step covering the file is shaped exactly like a region, and
+            // being outermost it would win — which evaluated the whole file.
+            name: 'a file that merely begins and ends with parens is not one block',
+            text: '(\na;\n)\n\n(\nb;\n)',
+            at: [5, 0],
+            expect: '(\nb;\n)',
+        },
+        {
+            // The other side of the same rule: here the region really does
+            // fill the file, so it is still the one to evaluate.
+            name: 'a file that is exactly one block still evaluates it',
+            text: '(\n\tSinOsc.ar(440).play;\n)',
+            at: [1, 12],
+            expect: '(\n\tSinOsc.ar(440).play;\n)',
+        },
     ];
 
     let failures = 0;

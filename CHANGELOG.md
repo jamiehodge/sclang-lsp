@@ -3,6 +3,33 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## Unreleased
+
+### Fixed
+
+- **Evaluating a region really does evaluate just that region.** 0.7.2 stopped
+  the *server* offering a selection-range step for the whole file, which was
+  necessary and not sufficient: the extension was asking
+  `vscode.executeSelectionRangeProvider`, and that command merges every
+  registered provider with VS Code's own `WordSelectionRangeProvider`, whose
+  last contribution is unconditionally `getFullModelRange()`. The editor put
+  the step straight back, and ⌘⏎ went on running the whole file.
+
+  The extension now sends `textDocument/selectionRange` to the server through
+  the language client, which is a direct request with nothing merged into it.
+  It is also the question actually meant: what the parser saw, rather than what
+  every provider in the editor thinks.
+
+  One behaviour change falls out of it. Blocks were always the server's
+  contribution, but the old call had the editor's own providers to fall back
+  on; now, if the server is not up yet, there is no chain and ⌘⏎ evaluates the
+  current line. That fallback was what produced the wrong answer.
+
+  `scripts/e2e-selection.js` covers both shapes that were wrong, and is now the
+  same path the extension takes: the built server over stdio, through
+  `pickBlock`. Reverting the 0.7.2 half fails it, which is the check that says
+  both halves are load-bearing.
+
 ## [0.7.2] — 2026-09-13
 
 ### Fixed
