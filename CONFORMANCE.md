@@ -217,7 +217,7 @@ boot servers, open windows and make noise.
 ```
 snippets compared         : 4,785
 lossless                  : 4,785 / 4,785  (all)
-sclang accepts, we do not : 42
+sclang accepts, we do not : 4
 ```
 
 The asymmetry is the point. A snippet sclang accepts and this rejects is a bug
@@ -232,11 +232,17 @@ every literal collection at the start of a statement — `Set[1, 2, 3]`,
 `Set[1,` begins exactly like `Array[slot] :`. That last one alone accounted for
 82 of the 125 disagreements the first run reported.
 
-The 42 that remain are genuinely unimplemented rather than wrong: list
-comprehensions (`{: expr, x <- (0..10) }`), the `(:a..b)` series form, a few
-characters the lexer does not know, and `ClassName { … }` at the top level of a
-script — which is a call there and a class definition in a `.sc` file, and needs
-the parser to know which kind of file it is reading.
+The first run reported 125. Working through them found six more divergences,
+none of which any other oracle could see: literal collections at the start of a
+statement read as indexed class definitions; list comprehensions, the `(:a..b)`
+series and `arrayelems`' general `key: value` form all unimplemented; `;` inside
+an argument, which `exprseq` allows; non-ASCII rejected as identifier
+characters, which sclang accepts; and `ClassName { … }`, which is a call in a
+script and a class definition in a `.sc` file — settled now by reading the two
+kinds of file with the two start symbols the grammar actually has.
+
+Four remain, all narrow: an adverb with a negative argument (`z +.-1 y`) and
+three bracket and paren shapes in help snippets that are as much prose as code.
 
 ### What it does not check
 

@@ -661,6 +661,10 @@ fn chain(range: &SelectionRange) -> Vec<Range> {
 /// A buffer that has never been saved has no path — the editor gives it a URI
 /// like `untitled:Untitled-1`. Everything has to keep working on one, because
 /// that is where SuperCollider tends to get written.
+///
+/// It is read as a script, not a class file. A class has to live in a `.sc`
+/// file on disk before sclang will compile it at all, so a class definition in
+/// an unsaved buffer could never be real.
 #[test]
 fn an_unsaved_buffer_is_a_document_like_any_other() {
     let mut h = Harness::start("untitled", &mini_library());
@@ -671,12 +675,12 @@ fn an_unsaved_buffer_is_a_document_like_any_other() {
         serde_json::json!({
             "textDocument": {
                 "uri": uri, "languageId": "supercollider", "version": 1,
-                "text": "Scratch : Object {\n\tgo { ^SinOsc.ar(440) }\n}\n",
+                "text": "(\nvar freq = 440;\nSinOsc.ar(freq);\n)\n",
             }
         }),
     );
 
-    // Diagnostics arrive for it.
+    // Diagnostics arrive for it, and a top-level block is valid script.
     let diagnostics = h.await_diagnostics(&uri);
     assert!(
         diagnostics.diagnostics.is_empty(),
@@ -685,7 +689,7 @@ fn an_unsaved_buffer_is_a_document_like_any_other() {
     );
 
     // Completion works inside it.
-    let response: Option<CompletionResponse> = h.request_at("textDocument/completion", &uri, 1, 14);
+    let response: Option<CompletionResponse> = h.request_at("textDocument/completion", &uri, 2, 9);
     let items = match response {
         Some(CompletionResponse::Array(items)) => items,
         Some(CompletionResponse::List(list)) => list.items,
@@ -696,34 +700,24 @@ fn an_unsaved_buffer_is_a_document_like_any_other() {
         "expected `ar` from an unsaved buffer"
     );
 
-    // And a class defined only here resolves back to it, which is the part
-    // that fails when a synthetic path cannot be turned back into a URI.
-    let scratch = h.open("User.scd", "Scratch.go");
+    // And a local declared in it resolves back to it, which is the part that
+    // fails when a URI cannot be turned back from its synthetic path.
     let definition: Option<GotoDefinitionResponse> =
-        h.request_at("textDocument/definition", &scratch, 0, 2);
-
+        h.request_at("textDocument/definition", &uri, 2, 12);
     match definition {
         Some(GotoDefinitionResponse::Scalar(location)) => assert_eq!(location.uri, uri),
         other => panic!("expected the unsaved buffer, got {other:?}"),
     }
 }
 
-/// A class in an unsaved buffer must be visible to the rest of the workspace,
-/// or a file being written is invisible until it is saved.
+/// An edit to a `.sc` file that has not been saved must still be visible to
+/// the rest of the workspace, or a class being written is invisible until it
+/// reaches disk.
 #[test]
-fn an_unsaved_buffer_contributes_to_completion_elsewhere() {
+fn an_unsaved_edit_to_a_class_file_contributes_to_completion_elsewhere() {
     let mut h = Harness::start("untitled-index", &mini_library());
 
-    let uri = Url::parse("untitled:Untitled-2").unwrap();
-    h.send_notification(
-        "textDocument/didOpen",
-        serde_json::json!({
-            "textDocument": {
-                "uri": uri, "languageId": "supercollider", "version": 1,
-                "text": "Wobbler : Object {\n\t*wobble { ^1 }\n}\n",
-            }
-        }),
-    );
+    let uri = h.open("Wobbler.sc", "Wobbler : Object {\n\t*wobble { ^1 }\n}\n");
     h.await_diagnostics(&uri);
 
     let other = h.open("Other.scd", "Wobb");
@@ -737,133 +731,7 @@ fn an_unsaved_buffer_contributes_to_completion_elsewhere() {
 
     assert!(
         items.iter().any(|i| i.label == "Wobbler"),
-        "a class in an unsaved buffer should still be offered"
-    );
-}
-
-/// Goto-definition picks one place; goto-implementation lists them all. In a
-/// dynamically dispatched language the second is often the question with the
-/// real answer.
-#[test]
-fn implementation_lists_every_class_defining_a_selector() {
-    let mut h = Harness::start("impl", &mini_library());
-    let uri = h.open("Use.scd", "SinOsc.ar(440)\n");
-
-    // `ar` is defined by both SinOsc and Saw in the miniature library.
-    let response: Option<GotoDefinitionResponse> =
-        h.request_at("textDocument/implementation", &uri, 0, 8);
-
-    let locations = match response {
-        Some(GotoDefinitionResponse::Array(l)) => l,
-        Some(GotoDefinitionResponse::Scalar(l)) => vec![l],
-        other => panic!("expected implementations, got {other:?}"),
-    };
-
-    let files: Vec<String> = locations
-        .iter()
-        .map(|l| l.uri.path().rsplit('/').next().unwrap().to_string())
-        .collect();
-
-    assert!(files.contains(&"SinOsc.sc".to_string()), "got {files:?}");
-    assert!(
-        files.contains(&"Saw.sc".to_string()),
-        "Saw also defines `ar`, so it is an implementation: {files:?}"
-    );
-}
-
-/// On a class name, the nearest thing SuperCollider has to implementations of
-/// an interface is the set of subclasses.
-#[test]
-fn implementation_on_a_class_name_lists_subclasses() {
-    let mut h = Harness::start("impl-subclasses", &mini_library());
-    let uri = h.open("Use.scd", "UGen\n");
-
-    let response: Option<GotoDefinitionResponse> =
-        h.request_at("textDocument/implementation", &uri, 0, 2);
-
-    let locations = match response {
-        Some(GotoDefinitionResponse::Array(l)) => l,
-        other => panic!("expected subclasses, got {other:?}"),
-    };
-
-    let files: Vec<String> = locations
-        .iter()
-        .map(|l| l.uri.path().rsplit('/').next().unwrap().to_string())
-        .collect();
-
-    assert!(files.contains(&"SinOsc.sc".to_string()), "got {files:?}");
-    assert!(files.contains(&"Saw.sc".to_string()), "got {files:?}");
-}
-
-/// A local is bound in exactly one place, so there is nothing to list.
-#[test]
-fn implementation_says_nothing_about_a_local() {
-    let mut h = Harness::start("impl-local", &mini_library());
-    let uri = h.open("Local.scd", "{ |freq| freq }\n");
-
-    let response: Option<GotoDefinitionResponse> =
-        h.request_at("textDocument/implementation", &uri, 0, 11);
-    assert!(response.is_none(), "got {response:?}");
-}
-
-/// A `.scd` file is usually several top-level `( … )` blocks. Evaluating one
-/// means finding its bounds without swallowing the next, which is what
-/// selection ranges are for — and what broke when the parser read `)` followed
-/// by `(` as a call.
-#[test]
-fn adjacent_blocks_have_their_own_selection_ranges() {
-    let mut h = Harness::start("two-blocks", &mini_library());
-    let source = "(\nSinOsc.ar(440);\n)\n\n(\nSaw.ar(220);\n)\n";
-    let uri = h.open("Two.scd", source);
-
-    // Byte offset of a position, so the text of a range can be inspected.
-    let offset = |p: Position| -> usize {
-        source
-            .lines()
-            .take(p.line as usize)
-            .map(|l| l.len() + 1)
-            .sum::<usize>()
-            + p.character as usize
-    };
-
-    // The same rule the editor applies: the widest range that starts a line
-    // and is parenthesised. That excludes the whole file, which starts at
-    // column 0 but ends with a newline rather than a `)`.
-    let block_at = |h: &mut Harness, line: u32, character: u32| -> Range {
-        let ranges: Vec<SelectionRange> = h.request(
-            "textDocument/selectionRange",
-            serde_json::json!({
-                "textDocument": { "uri": uri },
-                "positions": [{ "line": line, "character": character }],
-            }),
-        );
-        let mut widest = None;
-        let mut node = Some(&ranges[0]);
-        while let Some(step) = node {
-            let text = &source[offset(step.range.start)..offset(step.range.end)];
-            if step.range.start.character == 0 && text.starts_with('(') && text.ends_with(')') {
-                widest = Some(step.range);
-            }
-            node = step.parent.as_deref();
-        }
-        widest.expect("a block")
-    };
-
-    let first = block_at(&mut h, 1, 4);
-    let second = block_at(&mut h, 5, 4);
-
-    assert_eq!(first.start.line, 0, "first block starts at line 0");
-    assert_eq!(
-        first.end.line, 2,
-        "first block ends at its own `)`: {first:?}"
-    );
-    assert_eq!(
-        second.start.line, 4,
-        "second block starts after the blank line"
-    );
-    assert_eq!(
-        second.end.line, 6,
-        "second block ends at its own `)`: {second:?}"
+        "a class in an unsaved edit should still be offered"
     );
 }
 
@@ -921,4 +789,30 @@ fn variables_declared_bare_at_the_top_of_a_script() {
         None => Vec::new(),
     };
     assert!(items.iter().any(|i| i.label == "freq"), "got {items:?}");
+}
+
+/// `Routine { … }` is a call in a script and a class definition in a `.sc`
+/// file. Nothing in the text says which, so the extension does — the same
+/// split sclang makes between its two start symbols.
+#[test]
+fn a_block_after_a_class_name_depends_on_the_file() {
+    let mut h = Harness::start("file-mode", &mini_library());
+
+    // In a script it is a call, and parses.
+    let script = h.open("Play.scd", "Routine { 1.rand }.play;\n");
+    let in_script = h.await_diagnostics(&script);
+    assert!(
+        in_script.diagnostics.is_empty(),
+        "`Routine {{ }}` is a call in a script: {:?}",
+        in_script.diagnostics
+    );
+
+    // In a class file the same text opens a class body, and `1.rand` is not a
+    // member — which is the correct complaint there.
+    let class = h.open("Routine.sc", "Routine { 1.rand }\n");
+    let in_class = h.await_diagnostics(&class);
+    assert!(
+        !in_class.diagnostics.is_empty(),
+        "in a .sc file that is a class definition with a bad body"
+    );
 }

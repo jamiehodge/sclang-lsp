@@ -199,6 +199,10 @@ pub enum SyntaxKind {
     DotIndexExpr,
     /// `{ ... }`, a function literal (`block`).
     FunctionBlock,
+    /// `{: expr, x <- (0..3) }` — a list comprehension (`generator`).
+    Generator,
+    /// One `x <- xs`, `var a = b`, or guard of a list comprehension (`qual`).
+    Qualifier,
     /// `( ... )`, a parenthesised expression or an event literal.
     ParenExpr,
     /// `(a, b .. c)` (`valrangexd`).

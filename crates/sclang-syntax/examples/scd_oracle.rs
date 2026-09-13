@@ -12,7 +12,7 @@
 //!
 //!     ./oracle/run-scd.sh
 
-use sclang_syntax::parse;
+use sclang_syntax::parse_script;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -61,7 +61,7 @@ fn main() {
         };
 
         let sclang_ok = verdict == "ok";
-        let parsed = parse(&source);
+        let parsed = parse_script(&source);
         let ours_ok = parsed.is_ok();
 
         // Losslessness has to hold whatever the verdict: error recovery keeps

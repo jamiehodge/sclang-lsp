@@ -7,7 +7,7 @@
 
 use crate::line_index::{LineIndex, PositionEncoding};
 use lsp_types::{TextDocumentContentChangeEvent, Url};
-use sclang_syntax::{parse, Parse};
+use sclang_syntax::{parse_with, Mode, Parse};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -18,17 +18,27 @@ pub struct Document {
     pub text: String,
     pub version: i32,
     pub line_index: LineIndex,
+    /// Which of the grammar's two start symbols this file uses. A `.sc` file
+    /// is class definitions; everything else is interpreted code, and the
+    /// readings genuinely differ — `Routine { … }` is a class definition in
+    /// one and a call in the other.
+    mode: Mode,
     parse: Parse,
 }
 
 impl Document {
     pub fn new(text: String, version: i32) -> Self {
+        Document::with_mode(text, version, Mode::ClassFile)
+    }
+
+    pub fn with_mode(text: String, version: i32, mode: Mode) -> Self {
         let line_index = LineIndex::new(&text);
-        let parse = parse(&text);
+        let parse = parse_with(&text, mode);
         Document {
             text,
             version,
             line_index,
+            mode,
             parse,
         }
     }
@@ -69,7 +79,7 @@ impl Document {
             self.line_index = LineIndex::new(&self.text);
         }
         self.version = version;
-        self.parse = parse(&self.text);
+        self.parse = parse_with(&self.text, self.mode);
     }
 }
 
@@ -81,7 +91,9 @@ pub struct DocumentStore {
 
 impl DocumentStore {
     pub fn open(&mut self, uri: Url, text: String, version: i32) {
-        self.docs.insert(uri, Document::new(text, version));
+        let mode = mode_for(&uri);
+        self.docs
+            .insert(uri, Document::with_mode(text, version, mode));
     }
 
     pub fn close(&mut self, uri: &Url) {
@@ -110,6 +122,19 @@ impl DocumentStore {
 /// The index is keyed by path, so a URI that is not a file (an untitled
 /// buffer, say) gets a stable synthetic path rather than being dropped —
 /// otherwise its symbols would be invisible to the rest of the server.
+/// `.sc` is a class file; anything else is interpreted.
+///
+/// That is the same split sclang makes, and it has to be made from outside the
+/// text: nothing in `Routine { … }` says whether it defines a class or calls
+/// one.
+pub fn mode_for(uri: &Url) -> Mode {
+    if uri.path().ends_with(".sc") {
+        Mode::ClassFile
+    } else {
+        Mode::Script
+    }
+}
+
 pub fn uri_to_path(uri: &Url) -> PathBuf {
     uri.to_file_path()
         .unwrap_or_else(|()| PathBuf::from(uri.as_str()))

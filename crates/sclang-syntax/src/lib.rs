@@ -20,6 +20,7 @@ mod lexer;
 mod parser;
 mod tree;
 
+pub use grammar::Mode;
 pub use kind::SyntaxKind;
 pub use lexer::{tokenize, Lexer, Token};
 pub use tree::{Child, Parse, SyntaxError, SyntaxNode};
@@ -35,9 +36,30 @@ pub use tree::{Child, Parse, SyntaxError, SyntaxNode};
 /// assert!(parse.is_ok());
 /// ```
 pub fn parse(source: &str) -> Parse {
+    parse_with(source, Mode::ClassFile)
+}
+
+/// Parse a `.scd` script, or anything else that is interpreted rather than
+/// compiled as a class file.
+///
+/// The difference is real and the text does not carry it: `Routine { … }` is a
+/// call in a script and a class definition in a `.sc` file. sclang settles it
+/// the same way, by which of `root`'s alternatives it starts from.
+///
+/// ```
+/// let parse = sclang_syntax::parse_script("Routine { 1.rand }.play;");
+/// assert!(parse.is_ok());
+/// ```
+pub fn parse_script(source: &str) -> Parse {
+    parse_with(source, Mode::Script)
+}
+
+/// Parse in an explicit mode. [`parse`] and [`parse_script`] are the usual way
+/// in; this is for a caller that has the mode in a variable.
+pub fn parse_with(source: &str, mode: Mode) -> Parse {
     let tokens = tokenize(source);
     let mut p = parser::Parser::new(source, &tokens);
-    grammar::source_file(&mut p);
+    grammar::source_file(&mut p, mode);
     let (events, errors) = p.finish();
     parser::build_tree(source, &tokens, events, errors)
 }

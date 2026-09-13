@@ -3,6 +3,38 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## Unreleased
+
+### Fixed
+
+Six divergences from `lang11d`, all in script syntax, all found by the new
+oracle and none visible to any other.
+
+- **Literal collections at the start of a statement.** `Set[1, 2, 3]` begins
+  exactly like `Array[slot] : ArrayedCollection { … }`, and was read as one.
+  82 of the 125 first-run disagreements.
+- **`.sc` and `.scd` are read differently**, as `root : classes | … | INTERPRET
+  cmdlinecode` says they should be. `Routine { … }` is a class definition in a
+  class file and a call in a script, and nothing in the text says which.
+- **List comprehensions** — `{: [a, b], a <- (0..3), (a+b).isPrime }`, and the
+  `{; … }` form, with all six `qual` shapes.
+- **`(:2..5)`**, the series form that yields a Routine.
+- **`;` inside an argument**, which `exprseq` allows: `max(b = a * 2; b + 5, 10)`
+  is a two-argument call.
+- **`key: value` in array literals** where the key is any expression, as in
+  `#[freq, sustain]: Ptuple(…)`.
+- **Non-ASCII identifiers.** The lexer rejected them on the stated grounds that
+  `PyrLexer.cpp` is ASCII-only. sclang disagrees: `±` alone compiles, `var ±x`
+  compiles, `1 ± 2` does not — which is an identifier character, not an
+  operator. Fixing it also fixed a panic on the first non-ASCII byte.
+
+### Added
+
+- **A script oracle.** `./oracle/run-scd.sh` compiles 4,785 snippets — every
+  `code::` block in the help files, plus installed `.scd` files — with
+  `String:compile`, which parses without running, and diffs the verdicts.
+  Disagreements went 125 -> 4.
+
 ## [0.5.0] — 2026-09-13
 
 ### Fixed

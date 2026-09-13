@@ -247,9 +247,22 @@ fn strings_handle_escaped_quotes() {
     assert_eq!(pairs(src), vec![(String, r#""a \" b""#)]);
 }
 
+/// A fourth deliberate departure from sclang, and the same kind as the other
+/// three: sclang's lexer exists to reject bad input, and an editor's has to
+/// keep going.
+///
+/// An unterminated string or symbol is the ordinary state of a buffer someone
+/// is typing in, and it runs to the end of the file by definition. Calling it
+/// the literal it is lets the parser carry on with something it understands;
+/// calling it an error derails everything after the quote. Either way the token
+/// covers the same bytes, so nothing is lost.
 #[test]
-fn unterminated_string_is_an_error() {
-    assert_eq!(kinds("\"open"), vec![Error]);
+fn an_unterminated_literal_is_still_a_literal() {
+    assert_eq!(kinds("\"open"), vec![String]);
+    assert_eq!(kinds("'open"), vec![Symbol]);
+
+    // A terminated one is unaffected, including across newlines.
+    assert_eq!(pairs("\"a\nb\""), vec![(String, "\"a\nb\"")]);
 }
 
 #[test]

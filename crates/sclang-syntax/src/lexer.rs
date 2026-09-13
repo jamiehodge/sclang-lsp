@@ -23,15 +23,22 @@ fn is_binop_char(c: char) -> bool {
     BINOP_CHARS.contains(c)
 }
 
-/// sclang's identifier characters. Deliberately ASCII-only, matching
-/// `PyrLexer.cpp`; non-ASCII bytes outside strings and comments are an error in
-/// sclang too.
+/// sclang's identifier characters.
+///
+/// Non-ASCII counts, which this used to deny on the grounds that `PyrLexer.cpp`
+/// is ASCII-only. sclang disagrees, and says so plainly: `±` on its own
+/// compiles, `var ±x = 1;` compiles, and `1 ± 2` does not — which is the
+/// behaviour of an identifier character and not of an operator. A byte above
+/// ASCII lands in the identifier class of its character table.
+///
+/// So a name in any language lexes as a name here, rather than as an error
+/// token that derails everything after it.
 fn is_ident_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || c == '_'
+    c.is_ascii_alphabetic() || c == '_' || !c.is_ascii()
 }
 
 fn is_ident_continue(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_'
+    c.is_ascii_alphanumeric() || c == '_' || !c.is_ascii()
 }
 
 /// sclang's whitespace set (`PyrLexer.cpp` start state).
@@ -156,7 +163,7 @@ impl<'a> Lexer<'a> {
                 _ => self.binop(),
             },
 
-            _ if is_ident_start(c) => self.ident(),
+            _ if is_ident_start(c) => self.ident(c),
             _ if c.is_ascii_digit() => self.number(),
 
             '"' => self.string(),
@@ -248,8 +255,10 @@ impl<'a> Lexer<'a> {
     }
 
     /// Identifiers, keywords, class names, primitive names, and `foo:`.
-    fn ident(&mut self) -> SyntaxKind {
-        let start = self.pos - 1; // the first char was already consumed
+    fn ident(&mut self, first: char) -> SyntaxKind {
+        // The first character was already consumed, and it is not necessarily
+        // one byte wide: an identifier may start with any non-ASCII character.
+        let start = self.pos - first.len_utf8();
         self.eat_while(is_ident_continue);
 
         // An identifier immediately followed by `:` is a single keyword-binop
@@ -381,7 +390,11 @@ impl<'a> Lexer<'a> {
                 _ => {}
             }
         }
-        SyntaxKind::Error
+        // Unterminated at end of input. sclang closes it there rather than
+        // rejecting the file, and so does this: a half-typed string is the
+        // ordinary state of a buffer, and turning the rest of it into an error
+        // token helps nobody.
+        SyntaxKind::String
     }
 
     /// `'foo'`, the quoted symbol form.
@@ -395,7 +408,8 @@ impl<'a> Lexer<'a> {
                 _ => {}
             }
         }
-        SyntaxKind::Error
+        // Unterminated, as above.
+        SyntaxKind::Symbol
     }
 
     /// `\foo`, `\123`, or a bare `\`. sclang accepts an alphanumeric run or a

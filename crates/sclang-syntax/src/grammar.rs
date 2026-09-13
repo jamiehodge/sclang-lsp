@@ -52,16 +52,34 @@ const EXPR_START: &[SyntaxKind] = &[
 /// A file is either class definitions or loose code, and the parser does not
 /// need to be told which: a `ClassName {` or `+ ClassName {` at the top level
 /// is a class, anything else is an expression.
-pub(crate) fn source_file(p: &mut Parser) {
+/// Which of `root`'s alternatives is being parsed.
+///
+/// ```text
+/// root : classes | classextensions | INTERPRET cmdlinecode
+/// ```
+///
+/// sclang decides this before parsing — its lexer injects `INTERPRET` for code
+/// that arrives to be interpreted rather than compiled as a class file — and
+/// the two readings genuinely differ. `Routine { … }` is a class definition in
+/// a `.sc` file and a call in a script, and nothing in the text says which.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// A `.sc` file: class definitions and extensions.
+    ClassFile,
+    /// A `.scd` file or anything else interpreted: `cmdlinecode`.
+    Script,
+}
+
+pub(crate) fn source_file(p: &mut Parser, mode: Mode) {
     let m = p.start();
     while !p.at_end() {
         if !p.progressing() {
             p.error_and_bump("parser stalled");
             continue;
         }
-        if at_class_def(p) {
+        if mode == Mode::ClassFile && at_class_def(p) {
             class_def(p);
-        } else if p.at(Plus) && p.nth(1) == ClassName {
+        } else if mode == Mode::ClassFile && p.at(Plus) && p.nth(1) == ClassName {
             class_extension(p);
         } else if p.at(ArgKw) {
             // `cmdlinecode : argdecls1 funcvardecls1 funcbody` — a script may
@@ -701,6 +719,74 @@ fn index_args(p: &mut Parser) {
 }
 
 /// Comma-separated arguments, stopping at any of `terminators`.
+/// ```text
+/// exprseq : exprn optsemi
+/// exprn   : expr | exprn ';' expr
+/// ```
+///
+/// Several expressions separated by `;`, of which the last is the value. An
+/// argument is an `exprseq`, which is why `max(b = a * 2; b + 5, 10)` is a
+/// two-argument call rather than a syntax error.
+fn expr_n(p: &mut Parser) {
+    expr(p);
+    // `optsemi` allows a trailing `;`, so only continue when something that
+    // can start an expression actually follows it.
+    while p.at(Semicolon) && EXPR_START.contains(&p.nth(1)) {
+        p.bump();
+        expr(p);
+    }
+}
+
+/// ```text
+/// arrayelems1 : exprseq
+///             | exprseq ':' exprseq
+///             | keybinop exprseq
+///             | arrayelems1 ',' …
+/// ```
+///
+/// Array literals take key/value pairs in two spellings. `name:` is one token
+/// and is shared with argument lists; the general form lets the key be any
+/// expression, which is how `#[freq, sustain]: Ptuple(…)` names a pair of keys
+/// at once.
+fn array_elems(p: &mut Parser) {
+    while !p.at_end() && !p.at(RBracket) {
+        if !p.progressing() {
+            break;
+        }
+
+        if p.at(KeywordBinop) {
+            let m = p.start();
+            p.bump();
+            expr_n(p);
+            m.complete(p, KeywordArg);
+        } else if p.at(Star) {
+            let m = p.start();
+            p.bump();
+            expr_n(p);
+            m.complete(p, SplatArg);
+        } else if p.at_any(EXPR_START) {
+            let m = p.start();
+            expr_n(p);
+            if p.eat(Colon) {
+                expr_n(p);
+                m.complete(p, KeywordArg);
+            } else {
+                m.abandon(p);
+            }
+        } else {
+            p.error(format!("unexpected {:?} in array literal", p.current()));
+            p.recover_until(&[RBracket, Comma]);
+            if !p.at(Comma) {
+                break;
+            }
+        }
+
+        if !p.eat(Comma) {
+            break;
+        }
+    }
+}
+
 fn arg_list_items_until(p: &mut Parser, terminators: &[SyntaxKind]) {
     while !p.at_end() && !p.at_any(terminators) {
         if !p.progressing() {
@@ -730,6 +816,9 @@ fn arg_list_items_until(p: &mut Parser, terminators: &[SyntaxKind]) {
 }
 
 /// Comma-separated arguments, each optionally `key: value`.
+///
+/// `arglist1 : exprseq | arglist1 ',' exprseq`, and an `exprseq` may contain
+/// `;` — so each argument is an [`expr_n`] rather than a single expression.
 fn arg_list_items(p: &mut Parser, terminator: SyntaxKind) {
     while !p.at_end() && !p.at(terminator) {
         if !p.progressing() {
@@ -738,16 +827,16 @@ fn arg_list_items(p: &mut Parser, terminator: SyntaxKind) {
         if p.at(KeywordBinop) {
             let m = p.start();
             p.bump();
-            expr(p);
+            expr_n(p);
             m.complete(p, KeywordArg);
         } else if p.at(Star) {
             // `arglistv1 : '*' exprseq` — array expansion, as in `f(*args)`.
             let m = p.start();
             p.bump();
-            expr(p);
+            expr_n(p);
             m.complete(p, SplatArg);
         } else if p.at_any(EXPR_START) {
-            expr(p);
+            expr_n(p);
         } else {
             p.error(format!("unexpected {:?} in argument list", p.current()));
             p.recover_until(&[Comma, terminator]);
@@ -762,12 +851,113 @@ fn arg_list_items(p: &mut Parser, terminator: SyntaxKind) {
 
 /// `block : '{' argdecls funcvardecls funcbody '}'`, and the `#{ }` closed
 /// form.
+/// ```text
+/// valrange3 : DOTDOT exprseq
+///           | exprseq DOTDOT
+///           | exprseq DOTDOT exprseq
+///           | exprseq ',' exprseq DOTDOT
+///           | exprseq ',' exprseq DOTDOT exprseq
+/// ```
+///
+/// The contents of a series, with every bound optional. The comma form carries
+/// the second element rather than a step: `(1, 3 .. 9)` counts in twos.
+fn val_range(p: &mut Parser) {
+    if p.at(DotDot) {
+        p.bump();
+        if p.at_any(EXPR_START) {
+            expr(p);
+        }
+        return;
+    }
+
+    expr(p);
+    if p.eat(Comma) {
+        expr(p);
+    }
+    if p.eat(DotDot) && p.at_any(EXPR_START) {
+        expr(p);
+    }
+}
+
 fn function_block(p: &mut Parser) -> CompletedMarker {
     let m = p.start();
     p.bump(); // '{' or '#{'
+
+    // ```text
+    // generator : '{' ':' exprseq ',' qual '}'
+    //           | '{' ';' exprseq ',' qual '}'
+    // ```
+    //
+    // A list comprehension. The `:` form collects into an Array and the `;`
+    // form yields a Routine; they differ in nothing else, and neither can be
+    // confused with a function body, which cannot begin with either token.
+    if p.at(Colon) || p.at(Semicolon) {
+        p.bump();
+        expr_seq(p, &[Comma, RBrace]);
+        while p.eat(Comma) {
+            if !p.progressing() {
+                break;
+            }
+            qualifier(p);
+        }
+        p.expect(RBrace);
+        return m.complete(p, Generator);
+    }
+
     function_body(p, &[RBrace]);
     p.expect(RBrace);
     m.complete(p, FunctionBlock)
+}
+
+/// ```text
+/// qual : name LEFTARROW exprseq nextqual
+///      | name name LEFTARROW exprseq nextqual
+///      | VAR name '=' exprseq nextqual
+///      | exprseq nextqual
+///      | ':' ':' exprseq nextqual
+///      | ':' WHILE exprseq nextqual
+/// ```
+///
+/// One clause of a list comprehension: a generator (`x <- xs`), a binding, a
+/// guard, or one of the two `:`-led forms — `::` for a side effect and
+/// `:while` for early termination.
+fn qualifier(p: &mut Parser) {
+    let m = p.start();
+
+    if p.at(VarKw) {
+        p.bump();
+        p.expect(Ident);
+        if p.eat(Eq) {
+            expr(p);
+        }
+        m.complete(p, Qualifier);
+        return;
+    }
+
+    if p.at(Colon) {
+        p.bump();
+        // `::` or `:while`, then the expression either takes.
+        if !p.eat(Colon) {
+            p.expect(WhileKw);
+        }
+        expr(p);
+        m.complete(p, Qualifier);
+        return;
+    }
+
+    // `name <- xs` and `name name <- xs`, the second naming the index. A bare
+    // expression is a guard, and is the fallback.
+    if p.at(Ident) && (p.nth(1) == LeftArrow || (p.nth(1) == Ident && p.nth(2) == LeftArrow)) {
+        p.bump();
+        p.eat(Ident);
+        p.expect(LeftArrow);
+        expr(p);
+        m.complete(p, Qualifier);
+        return;
+    }
+
+    expr(p);
+    m.complete(p, Qualifier);
 }
 
 /// Literals, names, and the bracketed forms.
@@ -900,6 +1090,15 @@ fn paren_or_series(p: &mut Parser) -> CompletedMarker {
     if p.at(DotDot) {
         p.bump();
         expr(p);
+        p.expect(RParen);
+        return m.complete(p, ArithSeries);
+    }
+
+    // `'(' ':' valrange3 ')'` — the lazy form, `(:2..5)`, which yields a
+    // Routine where `(2..5)` yields an Array. Same range shapes either way.
+    if p.at(Colon) {
+        p.bump();
+        val_range(p);
         p.expect(RParen);
         return m.complete(p, ArithSeries);
     }
@@ -1047,7 +1246,7 @@ fn paren_or_series(p: &mut Parser) -> CompletedMarker {
 fn collection(p: &mut Parser) -> CompletedMarker {
     let m = p.start();
     p.bump(); // '['
-    arg_list_items(p, RBracket);
+    array_elems(p);
     if !p.eat(RBracket) {
         p.error("expected ']'");
         p.recover_until(&[RBracket, Semicolon, RBrace]);
