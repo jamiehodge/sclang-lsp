@@ -7,6 +7,16 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
 ### Fixed
 
+- **`var` and `arg` declarations work in a top-level block.** `( var a = 1; … )`
+  is how most of a `.scd` file is written, and `cmdlinecode` in `lang11d` spells
+  it out — `'(' argdecls1 funcvardecls1 funcbody ')'`, along with the same
+  declarations bare at the top of a script. Neither was implemented, so both
+  reported syntax errors on correct code.
+
+  The declarations are also a scope now. A `var` in the block you are working in
+  is offered by completion and resolved by hover and goto, as it already was
+  inside a function body.
+
 - **Adjacent top-level blocks are separate again.** A `.scd` file is normally a
   sequence of `( … )` blocks with no separators between them, evaluated one at
   a time — the file is never parsed as a unit. The parser allowed *any*

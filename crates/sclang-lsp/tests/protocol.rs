@@ -866,3 +866,59 @@ fn adjacent_blocks_have_their_own_selection_ranges() {
         "second block ends at its own `)`: {second:?}"
     );
 }
+
+/// `cmdlinecode` lets a script declare variables in a top-level `( … )` block,
+/// which is how most `.scd` files are written. They have to parse, and they
+/// have to be visible to completion in the block they belong to.
+#[test]
+fn variables_declared_in_a_top_level_block() {
+    let mut h = Harness::start("cmdline-vars", &mini_library());
+    let uri = h.open(
+        "Block.scd",
+        "(\nvar freq = 440;\nvar amp = 0.1;\nSinOsc.ar(fr);\n)\n",
+    );
+
+    // No complaint about the declarations themselves.
+    let diagnostics = h.await_diagnostics(&uri);
+    assert!(
+        diagnostics.diagnostics.is_empty(),
+        "`var` in a top-level block is valid SuperCollider: {:?}",
+        diagnostics.diagnostics
+    );
+
+    // And they are in scope inside it.
+    let response: Option<CompletionResponse> = h.request_at("textDocument/completion", &uri, 3, 12);
+    let items = match response {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(
+        items.iter().any(|i| i.label == "freq"),
+        "a local declared in the block should be offered: {:?}",
+        items.iter().map(|i| &i.label).take(10).collect::<Vec<_>>()
+    );
+}
+
+/// The same declarations with no block around them at all, which
+/// `cmdlinecode` also allows.
+#[test]
+fn variables_declared_bare_at_the_top_of_a_script() {
+    let mut h = Harness::start("cmdline-bare-vars", &mini_library());
+    let uri = h.open("Bare.scd", "var freq = 440;\nSinOsc.ar(fr);\n");
+
+    let diagnostics = h.await_diagnostics(&uri);
+    assert!(
+        diagnostics.diagnostics.is_empty(),
+        "a bare `var` at the top of a script is valid: {:?}",
+        diagnostics.diagnostics
+    );
+
+    let response: Option<CompletionResponse> = h.request_at("textDocument/completion", &uri, 1, 12);
+    let items = match response {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(items.iter().any(|i| i.label == "freq"), "got {items:?}");
+}

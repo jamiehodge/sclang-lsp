@@ -79,7 +79,15 @@ pub fn locals_at(root: &SyntaxNode, source: &str, offset: u32) -> Vec<Local> {
     // the one whose declarations shadow — at the front.
     for node in ancestors_at(root, offset).into_iter().rev() {
         match node.kind {
-            SyntaxKind::MethodDef | SyntaxKind::FunctionBlock => {
+            // `cmdlinecode` lets a script declare variables in a top-level
+            // `( … )` block, or bare at the top of the file, and both are
+            // scopes like any function body. Without these, the `var`s in the
+            // block someone is actually working in are invisible to
+            // completion, hover and goto.
+            SyntaxKind::MethodDef
+            | SyntaxKind::FunctionBlock
+            | SyntaxKind::ParenExpr
+            | SyntaxKind::SourceFile => {
                 collect_declarations(node, source, &mut out);
             }
             SyntaxKind::ClassDef | SyntaxKind::ClassExtension => {

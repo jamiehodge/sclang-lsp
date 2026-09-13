@@ -63,6 +63,13 @@ pub(crate) fn source_file(p: &mut Parser) {
             class_def(p);
         } else if p.at(Plus) && p.nth(1) == ClassName {
             class_extension(p);
+        } else if p.at(ArgKw) {
+            // `cmdlinecode : argdecls1 funcvardecls1 funcbody` — a script may
+            // declare arguments and variables before its body, with no block
+            // around them at all.
+            arg_decls(p);
+        } else if p.at(VarKw) {
+            var_decls(p);
         } else if p.at_any(EXPR_START) {
             expr_statement(p);
         } else {
@@ -183,7 +190,7 @@ fn method_def(p: &mut Parser) {
     }
     p.bump(); // the name, ordinary or operator
     if p.expect(LBrace) {
-        function_body(p);
+        function_body(p, &[RBrace]);
         p.expect(RBrace);
     }
     m.complete(p, MethodDef);
@@ -232,7 +239,7 @@ fn slot_def(p: &mut Parser) {
 }
 
 /// `argdecls funcvardecls primitive methbody` — the inside of any `{ }`.
-fn function_body(p: &mut Parser) {
+fn function_body(p: &mut Parser, end: &[SyntaxKind]) {
     arg_decls(p);
     while p.at(VarKw) {
         if !p.progressing() {
@@ -247,7 +254,7 @@ fn function_body(p: &mut Parser) {
         p.eat(Semicolon);
         m.complete(p, Primitive);
     }
-    expr_seq(p, &[RBrace]);
+    expr_seq(p, end);
 }
 
 /// ```text
@@ -734,7 +741,7 @@ fn arg_list_items(p: &mut Parser, terminator: SyntaxKind) {
 fn function_block(p: &mut Parser) -> CompletedMarker {
     let m = p.start();
     p.bump(); // '{' or '#{'
-    function_body(p);
+    function_body(p, &[RBrace]);
     p.expect(RBrace);
     m.complete(p, FunctionBlock)
 }
@@ -848,6 +855,22 @@ fn multi_assign(p: &mut Parser) -> CompletedMarker {
 fn paren_or_series(p: &mut Parser) -> CompletedMarker {
     let m = p.start();
     p.bump(); // '('
+
+    // ```text
+    // cmdlinecode : '(' argdecls1 funcvardecls1 funcbody ')'
+    //             | '(' argdecls1 funcbody ')'
+    //             | '(' funcvardecls1 funcbody ')'
+    // ```
+    //
+    // A block that declares its own variables, which is how most of a `.scd`
+    // file is written. Nothing else parenthesised can begin with `var`, `arg`
+    // or `|`, so one token of lookahead settles it — `|` in particular cannot
+    // be a binary operator here, having nothing on its left.
+    if p.at_any(&[VarKw, ArgKw, Pipe]) {
+        function_body(p, &[RParen]);
+        p.expect(RParen);
+        return m.complete(p, ParenExpr);
+    }
 
     // `(..n)` — a series with no lower bound.
     if p.at(DotDot) {
