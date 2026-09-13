@@ -1,7 +1,7 @@
 {
   "name": "sclang-lsp",
   "description": "SuperCollider language server for code intelligence. Reads the class library by parsing it, so it works with sclang absent, broken or busy.",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "author": {
     "name": "Jamie Hodge",
     "email": "448777+jamiehodge@users.noreply.github.com"
