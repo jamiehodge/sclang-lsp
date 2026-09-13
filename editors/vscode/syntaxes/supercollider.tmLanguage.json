@@ -1,0 +1,56 @@
+{
+    "name": "SuperCollider",
+    "scopeName": "source.supercollider",
+    "comment": "Strings and comments, and nothing else. This grammar is not here to colour anything — the server's semantic tokens do that, cover these same ranges, and win wherever both apply. It is here because VS Code's bracket matching, bracket-pair colouring and auto-closing read the TextMate token stream to know that a bracket inside a string or a comment is text rather than structure, and semantic tokens do not feed that path. Without it, `\"(\"`, `$(`, `'('` and `// (` all pair with a later `)`. Every rule below delimits a literal; none of them guesses what an identifier means, which is where the grammar this replaced went wrong.",
+    "patterns": [
+        {
+            "comment": "`//` to end of line.",
+            "name": "comment.line.double-slash.supercollider",
+            "match": "//.*"
+        },
+        {
+            "include": "#block-comment"
+        },
+        {
+            "comment": "A char literal, `$a` or `$\\n`. Scoped under `string` rather than `constant.character` on purpose: VS Code decides a token's standard type by matching /\\b(comment|string|regex|regexp)\\b/ against the scope name, so only a `string` or `comment` scope suppresses the brackets inside it — and `$(` is one of the four cases this file exists for. Listed before the string and symbol rules so `$\"` and `$'` are read as char literals rather than as opening a literal that never closes.",
+            "name": "string.other.character.supercollider",
+            "match": "\\$(\\\\.|.)"
+        },
+        {
+            "name": "string.quoted.double.supercollider",
+            "begin": "\"",
+            "end": "\"",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.supercollider",
+                    "match": "\\\\."
+                }
+            ]
+        },
+        {
+            "comment": "`'foo'` is a symbol, the same value `\\foo` is. A bare `\\foo` needs no rule: it cannot contain a bracket, so nothing depends on knowing where it ends.",
+            "name": "string.quoted.single.supercollider",
+            "begin": "'",
+            "end": "'",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.supercollider",
+                    "match": "\\\\."
+                }
+            ]
+        }
+    ],
+    "repository": {
+        "block-comment": {
+            "comment": "Block comments nest in SuperCollider — `/* /* */ */` is one comment, not a comment and a stray `*/` — so this rule includes itself.",
+            "name": "comment.block.supercollider",
+            "begin": "/\\*",
+            "end": "\\*/",
+            "patterns": [
+                {
+                    "include": "#block-comment"
+                }
+            ]
+        }
+    }
+}

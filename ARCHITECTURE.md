@@ -97,13 +97,22 @@ a client without one gets highlighting it otherwise has no source for. That is
 also why the capability is advertised unconditionally rather than per editor:
 a client that does not consume semantic tokens never sends the request.
 
-`editors/vscode` is now the second kind. Its TextMate grammar is gone, and the
-server is the only thing colouring SuperCollider there. What that gives up is
-worth stating: a file has no colour until the server answers, and VS Code's
-bracket matching loses the string- and comment-awareness it took from TextMate
-tokens, because semantic tokens do not feed it. Evaluation keeps its own
-awareness — the block picker reads `textDocument/selectionRange` rather than
-counting parentheses, which is the same reason it was built that way.
+`editors/vscode` is now the second kind: the server is the only thing that
+decides what colour anything is there. Its TextMate grammar went from 171 lines
+to five rules, and the five that remain colour nothing anyone sees — semantic
+tokens cover the same ranges and win.
+
+They are kept because colour is not all a grammar does. VS Code reads the
+TextMate token stream to decide whether a bracket is structure or text, and
+semantic tokens cannot stand in: they are a colour layer applied after
+tokenization, and no extension API supplies standard token types any other way.
+Delete the string and comment rules and `"("`, `$(`, `'('` and `// (` all start
+pairing with a later `)` — the same four cases that made counting parentheses
+in the extension a non-starter.
+
+So the division is: the parser says what a name *means*, and five regexes say
+where the literals are. Nothing overlaps, and nothing in the grammar can be
+wrong about an identifier, because it no longer has an opinion about one.
 
 ### Deltas
 

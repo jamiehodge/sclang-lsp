@@ -3,6 +3,31 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## Unreleased
+
+### Fixed
+
+- **Brackets inside strings and comments are text again.** Removing the
+  TextMate grammar in 0.7.0 took more with it than colour: VS Code decides
+  whether a `(` is structure from the TextMate token stream, and semantic
+  tokens cannot stand in — they are a colour layer applied after tokenization,
+  and no extension API supplies standard token types any other way. So `"("`,
+  `$(`, `'('` and `// (` all began pairing with a later `)` in bracket
+  matching, bracket-pair colouring and auto-closing.
+
+  The grammar is back at five rules: strings, symbols, char literals and
+  comments, nesting included. None of them guesses what an identifier means,
+  which is where the 171-line version went wrong, and none of them changes what
+  anything looks like — semantic tokens cover the same ranges and win wherever
+  both apply.
+
+  The char literal is scoped `string.other.character` rather than
+  `constant.character`, which reads oddly until you know that VS Code derives a
+  token's type by matching `\b(comment|string|regex|regexp)\b` against the
+  scope name. Only a `string` or `comment` scope suppresses the brackets inside
+  it, and `$(` is one of the four cases. `src/test/grammar.test.ts` pins all of
+  it against the tokenizer VS Code itself uses.
+
 ## [0.7.0] — 2026-09-13
 
 ### Added

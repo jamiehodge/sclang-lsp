@@ -152,18 +152,25 @@ GPL-3.0-or-later, matching the server.
 [`vscode-supercollider`](https://github.com/scztt/vscode-supercollider),
 MIT © 2022 Scott Carver. See [LICENSE-MIT](LICENSE-MIT).
 
-There is no TextMate grammar. Colour comes from the server's semantic tokens
-alone, so a selector is not a variable that happens to be lowercase and a
-parameter stays a parameter where it is used — distinctions a grammar matching
-on shape cannot make. Two things follow from having no grammar at all, and both
-are the trade rather than an oversight:
+`syntaxes/supercollider.tmLanguage.json` is not what it sounds like. Colour
+comes from the server's semantic tokens: a selector is not a variable that
+happens to be lowercase, and a parameter stays a parameter where it is used —
+distinctions a grammar matching on shape cannot make, and the 171-line grammar
+that used to be here got them wrong.
 
-- A file is uncoloured until the server answers, and stays uncoloured if the
-  server fails to start. Previously the grammar painted first and the tokens
-  refined it.
-- VS Code's bracket matching and bracket-pair colouring use TextMate tokens to
-  tell a real `(` from one inside a string or a comment, and semantic tokens do
-  not feed them. So `"("` may now pair with a later `)`. Evaluation is
-  unaffected — <kbd>⌘⏎</kbd> asks the server for the enclosing block through
-  `textDocument/selectionRange`, which reads the parse tree and has never
-  counted parentheses.
+What is left is five rules, and none of them guesses what an identifier means.
+They mark strings, symbols, char literals and comments, because VS Code decides
+whether a `(` is structure or text from the *TextMate* token stream, and
+semantic tokens do not feed that path — they are a colour layer applied after
+tokenization. Without those five rules, `"("`, `$(`, `'('` and `// (` all pair
+with a later `)` in bracket matching, bracket-pair colouring and auto-closing.
+
+They change nothing visually. Semantic tokens cover the same ranges and win
+wherever both apply, so the only moment the grammar's own colours show is the
+few milliseconds before the server answers. `src/test/grammar.test.ts` asserts
+the property they exist for, against the same tokenizer VS Code uses, because a
+wrong scope *name* still looks like a perfectly reasonable grammar.
+
+Evaluation never depended on any of this: <kbd>⌘⏎</kbd> asks the server for the
+enclosing block through `textDocument/selectionRange`, which reads the parse
+tree rather than counting parentheses.
