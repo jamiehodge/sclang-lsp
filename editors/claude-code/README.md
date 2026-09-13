@@ -11,13 +11,23 @@ is no adapter, no MCP server and no code here.
 /plugin install sclang-lsp
 ```
 
-The server binary has to be on your `PATH`. Download one from the
-[releases page](https://github.com/jamiehodge/sclang-lsp/releases/latest) and
-put it somewhere on `PATH`, or build it:
+The server binary has to be on the `PATH` **Claude Code itself sees**, which is
+not always the one your shell has. On macOS an app launched from the Finder or
+Dock inherits a minimal environment: `~/.cargo/bin` is not in it, so
+`cargo install sclang-lsp` leaves a binary that `which` finds and Claude
+cannot. The symptom is `ENOENT: sclang-lsp` from a server that registered fine.
+
+Somewhere already on the app's path is the safe answer:
 
 ```bash
-cargo build --release   # then copy target/release/sclang-lsp onto your PATH
+# macOS, Apple Silicon — /opt/homebrew/bin is user-writable
+cargo install --path crates/sclang-lsp
+ln -sf ~/.cargo/bin/sclang-lsp /opt/homebrew/bin/sclang-lsp
 ```
+
+Or download a binary from the
+[releases page](https://github.com/jamiehodge/sclang-lsp/releases/latest) and
+put it in `/usr/local/bin` (`sudo` on macOS) or anywhere else the app can see.
 
 SuperCollider itself is not required. The server reads the class library by
 parsing it, so it works with sclang absent, broken or busy — including on a
@@ -45,7 +55,11 @@ it in both places.
 `goToImplementation` is the one worth knowing about. SuperCollider dispatches at
 run time, so "where is this defined" usually has many answers — and that list is
 the honest one. Goto-definition narrows where it can; implementation does not
-narrow at all, on purpose.
+narrow at all, on purpose. On `play` in the stock class library it returns 32
+places, which is the point rather than a failure.
+
+Diagnostics arrive too, unasked: a syntax error in a file Claude reads is
+reported as it would be in an editor.
 
 ## What it does not do
 

@@ -18,6 +18,11 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
   else — no adapter, no MCP server, no code. The repository is its own
   marketplace: `/plugin marketplace add jamiehodge/sclang-lsp`.
 
+  Two things that are easy to get wrong and report nothing: `lspServers` goes in
+  `plugin.json` rather than the marketplace entry the official directory uses,
+  and the binary must be on the `PATH` the *app* inherits, which on macOS
+  excludes `~/.cargo/bin`.
+
 ## [0.4.0] — 2026-09-13
 
 ### Fixed
