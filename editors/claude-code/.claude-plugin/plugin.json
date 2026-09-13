@@ -5,5 +5,14 @@
   "author": {
     "name": "Jamie Hodge",
     "email": "448777+jamiehodge@users.noreply.github.com"
+  },
+  "lspServers": {
+    "sclang-lsp": {
+      "command": "sclang-lsp",
+      "extensionToLanguage": {
+        ".sc": "supercollider",
+        ".scd": "supercollider"
+      }
+    }
   }
 }

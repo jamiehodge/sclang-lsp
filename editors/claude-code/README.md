@@ -23,6 +23,14 @@ SuperCollider itself is not required. The server reads the class library by
 parsing it, so it works with sclang absent, broken or busy — including on a
 class library that does not compile.
 
+## Where the declaration goes
+
+`lspServers` belongs in `.claude-plugin/plugin.json`. The official marketplace
+carries it in the *marketplace* entry instead, and copying that shape looks
+right, validates, installs — and never registers a server, because Claude reads
+it from the plugin manifest. A submission to the official directory would want
+it in both places.
+
 ## What Claude can do with it
 
 | | |
