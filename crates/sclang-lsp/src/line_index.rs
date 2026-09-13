@@ -104,14 +104,25 @@ impl LineIndex {
         end
     }
 
-    /// Byte offset to LSP position.
-    pub fn position(&self, text: &str, offset: u32, enc: PositionEncoding) -> Position {
+    /// The line an offset falls on.
+    ///
+    /// No encoding needed: how a client counts characters changes the column
+    /// and never the line, which is why folding ranges can be answered without
+    /// negotiating anything.
+    pub fn line(&self, offset: u32) -> u32 {
         let offset = offset.min(self.len);
         // The line whose start is the last one at or before `offset`.
         let line = match self.line_starts.binary_search(&offset) {
             Ok(exact) => exact,
             Err(next) => next - 1,
-        } as u32;
+        };
+        line as u32
+    }
+
+    /// Byte offset to LSP position.
+    pub fn position(&self, text: &str, offset: u32, enc: PositionEncoding) -> Position {
+        let offset = offset.min(self.len);
+        let line = self.line(offset);
 
         let (start, end) = self.line_bounds(text, line);
         let stop = offset.min(end);

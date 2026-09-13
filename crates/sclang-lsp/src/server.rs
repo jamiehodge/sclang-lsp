@@ -303,6 +303,12 @@ impl Server {
                         .into(),
                     )
                 }),
+            request::FoldingRangeRequest::METHOD => {
+                self.handle::<request::FoldingRangeRequest>(req, |s, p| {
+                    let doc = s.docs.get(&p.text_document.uri)?;
+                    Some(features::folding_range::folding_ranges(doc))
+                })
+            }
             request::SelectionRangeRequest::METHOD => self
                 .handle::<request::SelectionRangeRequest>(req, |s, p| {
                     let doc = s.docs.get(&p.text_document.uri)?;
@@ -761,6 +767,7 @@ pub fn capabilities(enc: PositionEncoding) -> ServerCapabilities {
             }
             .into(),
         ),
+        folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
         selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
         workspace_symbol_provider: Some(OneOf::Left(true)),

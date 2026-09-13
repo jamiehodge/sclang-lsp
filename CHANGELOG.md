@@ -3,6 +3,28 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## Unreleased
+
+### Added
+
+- **Folding ranges.** Regions, class and method bodies, function literals,
+  collections and block comments.
+
+  The editor's fallback is indentation, and SuperCollider's central idiom
+  defeats it: a region is `(` and `)` at the start of a line, and what sits
+  between them is routinely not indented at all. There is no shape to infer a
+  fold from, so the one construct a file is organised around was the one that
+  could not be collapsed. The parser knows where each region ends.
+
+  `//#region` and `//#endregion` are honoured too. Declaring a folding range
+  provider is what stops the editor handling those markers itself, so leaving
+  them out would have quietly broken something that worked. They are read off
+  comment tokens rather than off lines, so a `//#region` inside a string is not
+  mistaken for one — which the editor's own marker matching would do.
+
+  Ranges are line-based, and so need no position encoding: how a client counts
+  characters changes the column and never the line.
+
 ## [0.8.0] — 2026-09-13
 
 ### Added

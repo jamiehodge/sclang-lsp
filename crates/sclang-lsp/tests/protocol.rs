@@ -811,6 +811,26 @@ fn an_open_buffer_outranks_what_the_watcher_reports() {
 }
 
 #[test]
+fn folding_ranges_cover_a_region_that_has_no_indentation() {
+    let mut h = Harness::start("folding", &mini_library());
+    // The idiom indentation folding cannot see: the region's contents start
+    // at column 0, exactly as the opening parenthesis does.
+    let uri = h.open(
+        "Test.scd",
+        "(\nPdef(\\a,\n\tPbind(\\b, 1)\n)\n)\n\n(\n2;\n)\n",
+    );
+    let _ = h.await_diagnostics(&uri);
+
+    let folds: Vec<FoldingRange> = h.request(
+        "textDocument/foldingRange",
+        serde_json::json!({ "textDocument": { "uri": uri } }),
+    );
+    let lines: Vec<_> = folds.iter().map(|f| (f.start_line, f.end_line)).collect();
+    assert!(lines.contains(&(0, 4)), "the first region: {lines:?}");
+    assert!(lines.contains(&(6, 8)), "the second region: {lines:?}");
+}
+
+#[test]
 fn malformed_params_are_answered_rather_than_ignored() {
     // A request must always get a response. Dropping one leaves the client
     // waiting on an id that never comes, which is a hang rather than a

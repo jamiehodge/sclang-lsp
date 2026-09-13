@@ -30,6 +30,7 @@ installed at all. It never starts sclang and never talks to one.
 | **Inlay hints** | The parameter each positional argument fills |
 | **Semantic tokens** | Colour from the parse tree: a selector is a method, a name declared as `arg` stays a parameter wherever it appears. `full`, `range` and `full/delta` |
 | **Symbols** | Classes with their methods nested, and across the workspace |
+| **Folding** | Regions, class and method bodies, collections and block comments — including the `( … )` idiom indentation folding cannot see |
 | **Selection ranges** | Expand-selection, following the real syntax |
 
 Unsaved edits count immediately: a class that exists only in a buffer is
