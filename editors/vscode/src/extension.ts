@@ -23,6 +23,7 @@ import { regionAt } from './region';
 import { Sclang } from './sclang';
 
 let client: LanguageClient | undefined;
+let sclang: Sclang | undefined;
 
 /** How long the evaluated region stays highlighted. */
 const FLASH_MS = 250;
@@ -87,8 +88,16 @@ async function restart(context: vscode.ExtensionContext): Promise<void> {
     await start(context);
 }
 
-export function deactivate(): Promise<void> | undefined {
-    return client?.stop();
+/// Shut both children down, and wait for them.
+///
+/// VS Code awaits this, which is the only chance to stop sclang properly —
+/// `dispose` returns void, so nothing waits for it and the host can exit first.
+/// A sclang left behind does not idle: with its stdin gone it spins on EOF, and
+/// a pegged core shows up as audio dropouts before anything else.
+export async function deactivate(): Promise<void> {
+    await Promise.all([client?.stop(), sclang?.shutdown()]);
+    client = undefined;
+    sclang = undefined;
 }
 
 function initializationOptions(): Record<string, unknown> {
@@ -105,27 +114,29 @@ function initializationOptions(): Record<string, unknown> {
 // ---- running code ----------------------------------------------------
 
 function registerSclang(context: vscode.ExtensionContext): void {
-    const sclang = new Sclang();
+    // Module scope, so `deactivate` can wait for it.
+    const owned = new Sclang();
+    sclang = owned;
     const errors = new CompileErrors();
     const flash = vscode.window.createTextEditorDecorationType({
         backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
     });
 
     context.subscriptions.push(
-        sclang,
+        owned,
         errors,
         flash,
 
-        sclang.onOutput((chunk) => {
+        owned.onOutput((chunk) => {
             if (vscode.workspace.getConfiguration('sclang-lsp').get<boolean>('compileErrors', true)) {
                 errors.feed(chunk);
             }
         }),
 
-        vscode.commands.registerCommand('sclang-lsp.startSclang', () => guard(sclang.start())),
-        vscode.commands.registerCommand('sclang-lsp.stopSclang', () => guard(sclang.stop())),
-        vscode.commands.registerCommand('sclang-lsp.restartSclang', () => guard(sclang.restart())),
-        vscode.commands.registerCommand('sclang-lsp.showPost', () => sclang.show()),
+        vscode.commands.registerCommand('sclang-lsp.startSclang', () => guard(owned.start())),
+        vscode.commands.registerCommand('sclang-lsp.stopSclang', () => guard(owned.stop())),
+        vscode.commands.registerCommand('sclang-lsp.restartSclang', () => guard(owned.restart())),
+        vscode.commands.registerCommand('sclang-lsp.showPost', () => owned.show()),
 
         // One command taking the code to run, so a user can bind whatever they
         // want — boot, quit, recompile — without the extension having an
@@ -137,7 +148,7 @@ function registerSclang(context: vscode.ExtensionContext): void {
                 );
                 return;
             }
-            guard(sclang.evaluate(code));
+            guard(owned.evaluate(code));
         }),
 
         vscode.commands.registerCommand('sclang-lsp.evaluate', async () => {
@@ -155,7 +166,7 @@ function registerSclang(context: vscode.ExtensionContext): void {
             setTimeout(() => editor.setDecorations(flash, []), FLASH_MS);
 
             await guard(
-                sclang.evaluate(region.text, {
+                owned.evaluate(region.text, {
                     line: region.range.start.line,
                     label: summarise(region.text),
                 }),

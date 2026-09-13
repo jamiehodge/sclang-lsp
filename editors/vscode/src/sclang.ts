@@ -86,6 +86,21 @@ export class Sclang implements vscode.Disposable {
         // host with it. The exit handler below is what actually reports this.
         child.stdin?.on('error', () => undefined);
 
+        // Last resort. `dispose` asks sclang to leave properly and waits, but
+        // if the extension host is going down faster than that, a synchronous
+        // kill on the way out beats leaving a process behind. An orphaned
+        // sclang does not idle quietly: with its stdin gone it spins on EOF,
+        // and a pegged core is audible as dropouts long before it is visible.
+        const killOnHostExit = () => {
+            try {
+                child.kill('SIGKILL');
+            } catch {
+                // Already gone.
+            }
+        };
+        process.once('exit', killOnHostExit);
+        child.once('exit', () => process.removeListener('exit', killOnHostExit));
+
         // sclang can leave at any point — `0.exit` from the buffer, a crash, a
         // class library that fails to compile. Whenever it does, this object
         // has to stop believing it has a process, or the next evaluation is
@@ -211,10 +226,19 @@ export class Sclang implements vscode.Disposable {
     }
 
     dispose(): void {
-        void this.stop();
+        void this.shutdown();
+    }
+
+    /// Stop sclang and release everything, as a promise the caller can wait on.
+    ///
+    /// `dispose` cannot: the interface returns void, so VS Code has nothing to
+    /// await and the extension host can exit first — which is how a process
+    /// gets left behind. `deactivate` uses this instead.
+    async shutdown(): Promise<void> {
+        await this.stop();
         this.emitter.dispose();
         this.post.dispose();
-        fs.promises.rm(this.scratch, { force: true }).catch(() => undefined);
+        await fs.promises.rm(this.scratch, { force: true }).catch(() => undefined);
     }
 }
 
