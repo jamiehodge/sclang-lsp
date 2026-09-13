@@ -70,7 +70,7 @@ fn push(out: &mut Vec<(u32, u32)>, range: (u32, u32)) {
 /// A cursor at the end of `foo` is on `foo`, not on whatever follows it, so a
 /// child ending exactly at the offset is taken when nothing strictly contains
 /// it. That is the position the user is in after typing a name.
-fn descend<'a>(node: &'a SyntaxNode, offset: u32) -> Option<&'a Child> {
+fn descend(node: &SyntaxNode, offset: u32) -> Option<&Child> {
     node.children
         .iter()
         .find(|c| {
