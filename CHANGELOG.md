@@ -3,11 +3,12 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
-## Unreleased
+## [0.7.0] — 2026-09-13
 
 ### Added
 
-- **Semantic tokens**, `full` and `range`. Colour now comes from the parse tree
+- **Semantic tokens**: `full`, `range` and `full/delta`. Colour now comes from
+  the parse tree
   rather than only from the editor's own grammar, which has to guess from shape
   alone: a lowercase word is a variable, a capitalised one is a class. The tree
   knows better. `blend` in `x.blend(1)` is a method; `foo` in `foo(a)` is also
@@ -28,13 +29,12 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
   runs the same checks over a real class library and the help-file corpus,
   where it clears 5,465 files and 546,358 tokens.
 
-  `full`, `range` and `full/delta`. A delta keeps one thing on the request
-  path — the array last sent for each open document, and the id it went out
-  under — and pays for it in transfer: a keystroke in a long class file sends
-  a handful of integers instead of a few hundred kilobytes of JSON. The diff is
-  one edit, because the relative encoding has already localised the change:
-  renaming something on line 100 leaves every token from line 101 on
-  byte-identical.
+  A delta keeps one thing on the request path — the array last sent for each
+  open document, and the id it went out under — and pays for it in transfer.
+  The diff is a single edit, which is enough because the relative encoding has
+  already localised the change: renaming something on line 100 leaves every
+  token from line 101 on byte-identical. A rename on line 100 of a 200-line
+  file sends 10 integers where the full array is 3,000.
 
 ### Changed
 
@@ -43,13 +43,20 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
   a variable, every capitalised one a class — and the semantic tokens were
   already overriding it nearly everywhere.
 
-  Two consequences, both the trade rather than an oversight. A file is
-  uncoloured until the server answers, where the grammar used to paint first.
-  And VS Code's bracket matching took its string- and comment-awareness from
-  TextMate tokens, which semantic tokens do not feed, so `"("` may now pair
-  with a later `)`. Evaluation is unaffected: <kbd>⌘⏎</kbd> asks the server for
-  the enclosing block through `textDocument/selectionRange`, which reads the
-  parse tree and has never counted parentheses.
+  Colour now waits on the server, which in practice is not a wait: spawn to
+  first tokens is 4–6ms, including a thousand-line class file, because
+  `initialize` returns before the class library is read and the tokens never
+  consult the index. What is genuinely given up is the failure case — if the
+  server does not start, nothing paints the file at all, where the grammar used
+  to.
+
+  The other consequence is real. VS Code takes its bracket matching and
+  bracket-pair colouring from TextMate tokens, which is how it knows a `(`
+  inside a string or comment is not structure; semantic tokens do not feed
+  either, so `"("` may now pair with a later `)`. Evaluation is unaffected by
+  construction: <kbd>⌘⏎</kbd> asks the server for the enclosing block through
+  `textDocument/selectionRange`, which reads the parse tree and has never
+  counted parentheses.
 
 ## [0.6.2] — 2026-09-13
 
@@ -273,6 +280,7 @@ First release.
   `sc_lexer`, symbol-for-symbol against the compiled class library, and
   selector-for-selector against a patched sclang's parse dump.
 
+[0.7.0]: https://github.com/jamiehodge/sclang-lsp/releases/tag/v0.7.0
 [0.6.2]: https://github.com/jamiehodge/sclang-lsp/releases/tag/v0.6.2
 [0.6.1]: https://github.com/jamiehodge/sclang-lsp/releases/tag/v0.6.1
 [0.6.0]: https://github.com/jamiehodge/sclang-lsp/releases/tag/v0.6.0
