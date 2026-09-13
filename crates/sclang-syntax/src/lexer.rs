@@ -34,16 +34,28 @@ fn is_binop_char(c: char) -> bool {
 /// So a name in any language lexes as a name here, rather than as an error
 /// token that derails everything after it.
 fn is_ident_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || c == '_' || !c.is_ascii()
+    c.is_ascii_alphabetic() || c == '_' || is_non_ascii_ident(c)
 }
 
 fn is_ident_continue(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_' || !c.is_ascii()
+    c.is_ascii_alphanumeric() || c == '_' || is_non_ascii_ident(c)
 }
 
-/// sclang's whitespace set (`PyrLexer.cpp` start state).
+/// Non-ASCII, but not a space.
+///
+/// sclang splits them: `x = [1,\u{a0}2]` compiles, so a non-breaking space
+/// separates tokens rather than joining them, while `var ±x = 1;` compiles, so
+/// `±` is part of the name. Help files are full of the former, usually pasted
+/// in by accident.
+fn is_non_ascii_ident(c: char) -> bool {
+    !c.is_ascii() && !c.is_whitespace()
+}
+
+/// sclang's whitespace set (`PyrLexer.cpp` start state), plus the non-ASCII
+/// spaces — a non-breaking space separates tokens for sclang, and appears
+/// throughout the help files where one was pasted in by accident.
 fn is_space(c: char) -> bool {
-    matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0b' | '\x0c')
+    matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0b' | '\x0c') || (!c.is_ascii() && c.is_whitespace())
 }
 
 /// A lexed token: a kind plus its half-open byte range in the source.

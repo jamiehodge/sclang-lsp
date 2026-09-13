@@ -217,7 +217,7 @@ boot servers, open windows and make noise.
 ```
 snippets compared         : 4,785
 lossless                  : 4,785 / 4,785  (all)
-sclang accepts, we do not : 4
+sclang accepts, we do not : 0
 ```
 
 The asymmetry is the point. A snippet sclang accepts and this rejects is a bug
@@ -241,8 +241,11 @@ characters, which sclang accepts; and `ClassName { … }`, which is a call in a
 script and a class definition in a `.sc` file — settled now by reading the two
 kinds of file with the two start symbols the grammar actually has.
 
-Four remain, all narrow: an adverb with a negative argument (`z +.-1 y`) and
-three bracket and paren shapes in help snippets that are as much prose as code.
+None remain. The last two were an adverb with a negative argument — `integer`
+in the grammar is `INTEGER | '-' INTEGER`, which the adverb rule did not honour
+— and the non-breaking spaces scattered through the help files, which sclang
+treats as spaces while treating `±` as part of a name. Every snippet sclang
+accepts now parses here.
 
 ### What it does not check
 

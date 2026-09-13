@@ -586,3 +586,18 @@ fn indexed_class_definitions_still_parse() {
     assert_eq!(count("Foo[] { bar { ^1 } }", SyntaxKind::ClassDef), 1);
     assert_eq!(count("Foo[slot] { bar { ^1 } }", SyntaxKind::ClassDef), 1);
 }
+
+/// `adverb : '.' name | '.' integer | '.' '(' exprseq ')'`, and `integer` is
+/// `INTEGER | '-' INTEGER` — so an adverb may be negative. `z +.-1 y` shifts
+/// the other way from `z +.1 y`.
+#[test]
+fn adverbs_take_a_negative_integer() {
+    for src in ["z +.-1 y", "z +.1 y", "z +.x y", "z +.(a + 1) y"] {
+        assert_eq!(count(src, SyntaxKind::Adverb), 1, "{src}");
+        assert!(parse(src).is_ok(), "{src} should parse");
+        assert_lossless(src);
+    }
+
+    // A `.` that is not an adverb is still a method call.
+    assert_eq!(count("z + y.abs", SyntaxKind::Adverb), 0);
+}

@@ -439,3 +439,23 @@ fn line_comment_ends_at_a_carriage_return() {
     assert_eq!(t[1].kind, Whitespace);
     assert_eq!(t[2].kind, Ident);
 }
+
+/// sclang splits non-ASCII two ways, and the split is observable: `x = [1,\u{a0}2]`
+/// compiles, so a non-breaking space separates tokens; `var ±x = 1;` compiles
+/// and `1 ± 2` does not, which is how an identifier behaves and not an
+/// operator.
+///
+/// The help files are full of non-breaking spaces pasted in by accident, and
+/// joining one to the next token turns a list into a syntax error.
+#[test]
+fn non_ascii_is_a_name_unless_it_is_a_space() {
+    // Part of a name.
+    assert_eq!(pairs("±"), vec![(Ident, "±")]);
+    assert_eq!(pairs("±x"), vec![(Ident, "±x")]);
+    assert_eq!(pairs("naïve"), vec![(Ident, "naïve")]);
+
+    // A separator, like any other space: `pairs` drops trivia, so two names
+    // coming back is exactly the point. `a±b` is one name for contrast.
+    assert_eq!(pairs("a\u{a0}b"), vec![(Ident, "a"), (Ident, "b")]);
+    assert_eq!(pairs("a±b"), vec![(Ident, "a±b")]);
+}

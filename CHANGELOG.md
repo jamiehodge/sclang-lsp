@@ -3,6 +3,23 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## Unreleased
+
+### Fixed
+
+- **An adverb may be negative.** `adverb : '.' integer` and `integer` is
+  `INTEGER | '-' INTEGER`, so `z +.-1 y` shifts the other way from `z +.1 y`.
+  The adverb rule accepted only an unsigned one.
+
+- **Non-breaking spaces are spaces.** Treating every non-ASCII character as
+  part of a name joined a stray `\u{a0}` to the token after it, turning a list
+  into a syntax error. sclang splits them, and says which is which: `x = [1,
+  \u{a0}2]` compiles, so a non-breaking space separates; `var ±x = 1;` compiles
+  and `1 ± 2` does not, so `±` is part of a name.
+
+  With these two, the script oracle reports **0** disagreements: every one of
+  the 4,785 snippets sclang accepts now parses here.
+
 ## [0.6.0] — 2026-09-13
 
 ### Fixed

@@ -533,13 +533,20 @@ fn adverb(p: &mut Parser) {
     if !p.at(Dot) {
         return;
     }
-    if !matches!(p.nth(1), Ident | Integer | LParen) {
+    // `integer : INTEGER | '-' INTEGER %prec UMINUS`, so the adverb's numeric
+    // form may be negative: `z +.-1 y` shifts the other way from `z +.1 y`.
+    let negative_integer = p.nth(1) == Minus && p.nth(2) == Integer;
+    if !matches!(p.nth(1), Ident | Integer | LParen) && !negative_integer {
         return;
     }
     let m = p.start();
     p.bump(); // '.'
     match p.current() {
         Ident | Integer => p.bump(),
+        Minus => {
+            p.bump();
+            p.expect(Integer);
+        }
         LParen => {
             p.bump();
             expr(p);
