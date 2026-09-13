@@ -69,6 +69,23 @@ with the file and line, and each compile replaces the last one's.
 sclang prints these before any image exists, so an extension that holds its
 output is the only thing that can report them at all.
 
+### Stopping cleanly
+
+Three paths, because one is not enough:
+
+- **Closing the window** runs `deactivate`, which waits for sclang to leave
+  properly — `0.exit`, so `Server.quitAll` runs and scsynth releases the audio
+  device on the way out.
+- **The extension host exiting under it** hits a synchronous kill registered on
+  `process.exit`, since `dispose` returns void and nothing waits for it.
+- **The host being killed outright** closes sclang's stdin, and sclang exits on
+  EOF by itself.
+
+An sclang that does get left behind is not a quiet nuisance: with nothing
+holding its stdin it spins at 100% of a core, and the first symptom is usually
+not a sluggish editor but dropouts in whatever is playing, because scsynth is
+competing with it for CPU.
+
 ## Commands
 
 | | |

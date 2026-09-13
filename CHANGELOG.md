@@ -3,6 +3,21 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## Unreleased
+
+### Fixed
+
+- **sclang is no longer left running when the extension goes away.**
+  `deactivate` awaited the language client and not sclang, and `dispose`
+  returns void, so nothing waited for the child — the extension host could exit
+  first. It now waits for both, with a synchronous kill registered on
+  `process.exit` for when it cannot.
+
+  This matters more than a stray process usually would: an sclang whose stdin
+  has gone spins at 100% of a core, and because scsynth competes with it for
+  CPU, the first symptom is dropouts in what is playing rather than anything
+  about the editor.
+
 ## [0.6.1] — 2026-09-13
 
 ### Fixed
