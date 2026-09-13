@@ -2,7 +2,11 @@
 name = "sclang-syntax"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 description = "Lexer and parser for SuperCollider, derived from sclang's own front end"
 
 [dependencies]

@@ -2,7 +2,11 @@
 name = "sclang-index"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 description = "Symbol index for SuperCollider, built over sclang-syntax trees"
 
 [dependencies]

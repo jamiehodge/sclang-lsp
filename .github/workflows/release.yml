@@ -16,11 +16,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: aarch64-apple-darwin,      os: macos-latest,   native: true }
-          - { target: x86_64-apple-darwin,       os: macos-latest }
-          - { target: x86_64-unknown-linux-gnu,  os: ubuntu-latest,  native: true }
-          - { target: aarch64-unknown-linux-gnu, os: ubuntu-latest,  apt: gcc-aarch64-linux-gnu }
-          - { target: x86_64-pc-windows-msvc,    os: windows-latest, native: true }
+          # `vscode` is the matching VS Code platform, so each server build
+          # also produces the extension that carries it.
+          - { target: aarch64-apple-darwin,      os: macos-latest,   native: true, vscode: darwin-arm64 }
+          - { target: x86_64-apple-darwin,       os: macos-latest,                 vscode: darwin-x64 }
+          - { target: x86_64-unknown-linux-gnu,  os: ubuntu-latest,  native: true, vscode: linux-x64 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-latest,  apt: gcc-aarch64-linux-gnu, vscode: linux-arm64 }
+          - { target: x86_64-pc-windows-msvc,    os: windows-latest, native: true, vscode: win32-x64 }
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -65,10 +67,32 @@ jobs:
               -C "$GITHUB_WORKSPACE" LICENSE README.md
           fi
 
+      # The extension bundles the server, so it is platform specific too and
+      # there is one per target. VS Code picks the right one on install, and
+      # `--target` is what tells the Marketplace which that is.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - run: npm ci
+        working-directory: editors/vscode
+
+      - name: Package the extension
+        shell: bash
+        working-directory: editors/vscode
+        run: |
+          npm run compile
+          node scripts/bundle-server.js "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release"
+          npx vsce package --target ${{ matrix.vscode }} --out "$GITHUB_WORKSPACE/sclang-lsp-${{ matrix.vscode }}.vsix"
+
       - uses: actions/upload-artifact@v5
         with:
           name: sclang-lsp-${{ matrix.target }}
-          path: sclang-lsp-${{ matrix.target }}.*
+          path: |
+            sclang-lsp-${{ matrix.target }}.*
+            sclang-lsp-${{ matrix.vscode }}.vsix
           if-no-files-found: error
 
   release:

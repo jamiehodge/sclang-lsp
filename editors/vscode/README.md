@@ -12,14 +12,20 @@ window; and see class-library compile errors in the Problems panel.
 
 ## Install
 
+Download the `.vsix` for your platform from the
+[releases page](https://github.com/jamiehodge/sclang-lsp/releases/latest) —
+`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64` or `win32-x64` — and
+install it:
+
 ```bash
-cargo build --release                              # from the repository root
-cd editors/vscode && npm install && npm run package
-code --install-extension sclang-lsp-*.vsix
+code --install-extension sclang-lsp-darwin-arm64.vsix
 ```
 
-The server binary is bundled into the `.vsix`, so nothing needs configuring.
+The server binary is bundled inside, so nothing needs configuring.
 SuperCollider itself is only needed if you want to run code.
+
+Not on the Marketplace yet. [DEVELOPING.md](DEVELOPING.md) covers building it
+from source.
 
 > Disable any other SuperCollider extension first. Two extensions contributing
 > the `supercollider` language means two servers answering every request, and

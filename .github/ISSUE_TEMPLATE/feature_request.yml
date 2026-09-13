@@ -1,0 +1,36 @@
+name: Feature request
+description: Something the server or the extension should do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Two things are deliberately out of scope, and ARCHITECTURE.md explains
+        why: the **server** never runs SuperCollider code or contacts a running
+        sclang, and features stay silent rather than guess when SuperCollider's
+        dynamic typing means the answer cannot be known.
+
+        Neither is a closed door — but a request that crosses one needs to say
+        why the trade should change.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The problem rather than the solution, if you can.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would it look like
+      description: If you have an idea of the behaviour, describe it.
+
+  - type: textarea
+    id: elsewhere
+    attributes:
+      label: Prior art
+      description: >
+        Does another editor or language server do this? Knowing how it behaves
+        there is usually the fastest way to agree on what is wanted.

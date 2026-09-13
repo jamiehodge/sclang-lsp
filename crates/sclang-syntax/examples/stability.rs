@@ -128,7 +128,7 @@ fn main() {
             while i < src.len() && !src.is_char_boundary(i) {
                 i -= 1;
             }
-            let mutated = if rng.next() % 2 == 0 {
+            let mutated = if rng.next().is_multiple_of(2) {
                 let mut m = String::with_capacity(src.len());
                 m.push_str(&src[..i]);
                 let mut rest = src[i..].chars();

@@ -2,7 +2,11 @@
 name = "sclang-lsp"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 description = "Language server for SuperCollider, with no runtime dependency on sclang"
 
 [[bin]]

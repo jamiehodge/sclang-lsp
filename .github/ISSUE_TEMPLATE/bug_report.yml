@@ -1,0 +1,64 @@
+name: Bug report
+description: Something the server or the extension gets wrong
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful thing you can include is the smallest `.sc` or `.scd`
+        file that shows the problem.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: sample
+    attributes:
+      label: SuperCollider code that shows it
+      description: The smallest file that reproduces it. Say where the cursor was, if that matters.
+      render: supercollider
+
+  - type: input
+    id: editor
+    attributes:
+      label: Editor
+      placeholder: VS Code 1.95, Neovim 0.11, Emacs 30 with eglot, Helix 25.01
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15.2 arm64, Ubuntu 24.04, Windows 11
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: sclang-lsp version
+      description: "`sclang-lsp --version`, or the extension version."
+    validations:
+      required: true
+
+  - type: input
+    id: supercollider
+    attributes:
+      label: SuperCollider version
+      description: Only if it is relevant — the server does not need one installed.
+      placeholder: 3.13.0, or "not installed"
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Server log
+      description: >
+        In VS Code, the command `SuperCollider: Show server log`. Elsewhere,
+        whatever your client records of the LSP conversation.
+      render: text

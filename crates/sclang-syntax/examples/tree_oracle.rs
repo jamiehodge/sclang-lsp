@@ -420,9 +420,9 @@ fn main() {
             let m = my_sels.get(at).map(String::as_str).unwrap_or("<end>");
             *diffs.entry(format!("sclang={t} ours={m}")).or_default() += 1;
             let want = std::env::args().nth(2);
-            let show = want.as_deref().map_or(true, |w| {
-                key.contains(w) || format!("sclang={t} ours={m}").contains(w)
-            });
+            let show = want
+                .as_deref()
+                .is_none_or(|w| key.contains(w) || format!("sclang={t} ours={m}").contains(w));
             if show && samples.len() < 15 {
                 samples.push(format!(
                     "{key}\n      sclang: {:?}\n      ours  : {:?}",

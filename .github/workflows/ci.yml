@@ -44,14 +44,10 @@ jobs:
 
       - run: cargo fmt --all --check
 
-      # Strict on the server, which is clean and should stay that way.
-      # `--no-deps` matters here: without it `-p` still lints workspace path
-      # dependencies, so sclang-syntax's known warnings become hard errors.
-      - run: cargo clippy -p sclang-lsp --all-targets --no-deps -- -D warnings
-
-      # Advisory on the rest: sclang-syntax carries three known warnings, two
-      # of which only newer APIs would silence. Reported in the log, not a gate.
-      - run: cargo clippy --workspace --all-targets
+      # Strict everywhere. sclang-syntax used to carry three known warnings
+      # that made this advisory; they are gone, and the examples are held to
+      # the same bar as the crates since they are how the oracles run.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
 
   extension:
     name: vscode extension

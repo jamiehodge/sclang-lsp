@@ -1,5 +1,9 @@
 # sclang-lsp
 
+[![CI](https://github.com/jamiehodge/sclang-lsp/actions/workflows/ci.yml/badge.svg)](https://github.com/jamiehodge/sclang-lsp/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/jamiehodge/sclang-lsp)](https://github.com/jamiehodge/sclang-lsp/releases/latest)
+[![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+
 A language server for SuperCollider.
 
 Completion that knows the class library. Hover with real signatures and the
@@ -32,17 +36,19 @@ visible to completion everywhere else.
 
 ### VS Code
 
-The extension lives in [`editors/vscode`](editors/vscode) and bundles the
-server. It is not on the Marketplace yet, so build the `.vsix`:
+Download the `.vsix` for your platform from the
+[releases page](../../releases) and install it:
 
 ```bash
-cargo build --release
-cd editors/vscode && npm install && npm run package
-code --install-extension sclang-lsp-*.vsix
+code --install-extension sclang-lsp-darwin-arm64.vsix
 ```
 
-It adds evaluation and a post window too — see
-[its README](editors/vscode/README.md).
+The server is bundled inside, so there is nothing to configure and
+SuperCollider itself is only needed if you want to run code. The extension adds
+evaluation and a post window too — see [its README](editors/vscode/README.md).
+
+Not on the Marketplace yet. To build it yourself, see
+[DEVELOPING.md](editors/vscode/DEVELOPING.md).
 
 > Disable any other SuperCollider extension first. Two extensions contributing
 > the `supercollider` language means two servers answering every request.
@@ -166,6 +172,8 @@ meant anything.
 
 - [CONFORMANCE.md](CONFORMANCE.md) — how the front end is derived and verified
 - [ARCHITECTURE.md](ARCHITECTURE.md) — the design decisions behind the topology
+- [CONTRIBUTING.md](CONTRIBUTING.md) — building, testing, and where the bar is
+- [CHANGELOG.md](CHANGELOG.md) — what changed and when
 - [`editors/vscode`](editors/vscode) — the extension, and running code
 
 ## License

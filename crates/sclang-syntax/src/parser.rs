@@ -134,12 +134,6 @@ impl<'a> Parser<'a> {
     }
 
     /// Text of the token at the cursor.
-    pub fn current_text(&self) -> &'a str {
-        self.tokens
-            .get(self.pos)
-            .map_or("", |t| t.text(self.source))
-    }
-
     pub fn at(&self, kind: SyntaxKind) -> bool {
         self.current() == kind
     }

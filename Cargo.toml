@@ -5,4 +5,9 @@ members = ["crates/sclang-index","crates/sclang-lsp","crates/sclang-syntax"]
 [workspace.package]
 version = "0.2.0"
 edition = "2021"
+# The toolchain CI lints with. Raising it should be a deliberate commit.
+rust-version = "1.98"
 license = "GPL-3.0-or-later"
+repository = "https://github.com/jamiehodge/sclang-lsp"
+keywords = ["supercollider", "sclang", "lsp", "language-server", "parser"]
+categories = ["development-tools"]

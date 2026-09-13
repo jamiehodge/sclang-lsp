@@ -80,9 +80,14 @@ code --install-extension sclang-lsp-*.vsix
 
 `npm run package` copies `target/release/sclang-lsp` into `server/` first. An
 installed extension lives in `~/.vscode/extensions` with no repository near it,
-so without the bundled copy there is nothing for it to find. Bundling makes the
-`.vsix` specific to the platform it was built on, which is what the per-target
-release artifacts exist for.
+so without the bundled copy there is nothing for it to find.
+
+That makes the `.vsix` specific to the platform it was built on. The release
+workflow handles this properly: each of the five server targets also produces a
+VS Code platform-specific build, tagged with `vsce package --target`, so
+installing from the Marketplace or the releases page gets the right one.
+`scripts/bundle-server.js` takes an optional directory for that, since a cross
+compile lands in `target/<triple>/release` rather than `target/release`.
 
 ## Layout
 

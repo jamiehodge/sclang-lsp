@@ -9,6 +9,10 @@
     "type": "git",
     "url": "https://github.com/jamiehodge/sclang-lsp"
   },
+  "bugs": {
+    "url": "https://github.com/jamiehodge/sclang-lsp/issues"
+  },
+  "homepage": "https://github.com/jamiehodge/sclang-lsp/tree/master/editors/vscode",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -16,6 +20,18 @@
     "Programming Languages",
     "Other"
   ],
+  "keywords": [
+    "supercollider",
+    "sclang",
+    "scd",
+    "language server",
+    "livecoding"
+  ],
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#14171f",
+    "theme": "dark"
+  },
   "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:supercollider"
