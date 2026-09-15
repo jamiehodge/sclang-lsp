@@ -212,6 +212,45 @@ Those are how the parser earns its claim to fidelity, and they run on a
 developer's machine, never on a user's. "No dependency on sclang" is a
 statement about the shipped binary.
 
+## Formatting is indentation
+
+`textDocument/formatting` rewrites the leading whitespace of a line and nothing
+else. It is an indenter, and the README says so rather than implying a
+formatter that stops early.
+
+Reflowing was considered and rejected. SuperCollider's two most-written idioms
+are hand-aligned columns — a `Pbind`'s key/value pairs and a `SynthDef`'s UGen
+arguments — and every general line-breaking algorithm either collapses them
+onto one line or explodes them to one item per line. Neither is what anyone
+wants, and the feature would be switched off on first use. There is also no
+agreed SuperCollider style to converge on, so choosing line breaks would mean
+minting one; choosing indentation does not. A reflowing formatter is a
+normative claim, an indenter a mechanical one.
+
+What the parser buys here is the same thing it buys selection ranges. The
+editor's own indentation is two regexes in `language-configuration.json`, and
+they are wrong on `"("`, `$(`, `'('` and `// (` — the four cases that also made
+counting parentheses in the extension a non-starter — and cannot track a nested
+block comment at all. None of them is an `LParen`, so none of them arises here.
+The `["|", "|"]` bracket pair is the same shape of bug in the other direction:
+pipes delimit `|a, b|` and not `a | b`, and only the tree knows which.
+
+A node indents its body exactly when it has an opening and a closing delimiter
+among its children. That falls out of the tree rather than from a list of kinds,
+which is what makes `SourceFile` and `ExprSeq` transparent without being named.
+
+Every answer is relative to an earlier line rather than an absolute depth: a
+body is one level deeper than the line its bracket opened on, a closing bracket
+takes that line exactly, and a continuation keeps the offset it already had.
+That last rule is what preserves hand alignment while still letting a line move
+with its block, and making the first two relative as well is what lets them
+compose — a call split across lines inside an aligned continuation indents from
+where the continuation actually sits.
+
+A file that does not parse is left alone, and silently: format-on-save runs on
+every save of a file someone is still typing into, and a notification each time
+would be noise that the diagnostics already deliver properly.
+
 ## Deliberately not done
 
 - **No talking to sclang.** Not spawned, not connected to, not required. See
@@ -230,6 +269,16 @@ statement about the shipped binary.
 - **No linking `sc_lexer`.** Upstream's lexer is used as a *test oracle*, not a
   dependency, so the crate stays pure Rust and cross-compiles without a C++
   toolchain. Their C++ API is newer and moves faster than the language does.
+- **No on-type formatting.** It has to run on a tree that is mid-edit and
+  therefore broken, which is the hard version of the problem, and VS Code's
+  `editor.formatOnType` is off by default so most users would never see it.
+  More to the point, LSP has no way for a server to contribute indentation
+  rules at all: the Enter key belongs to `language-configuration.json` on VS
+  Code and to tree-sitter `indents.scm` on Helix, Zed and Neovim, whatever this
+  server knows. That is a second reason the grammar below is worth having.
+- **No intra-line whitespace.** Space after a comma, spaces around an operator:
+  these look harmless and are exactly what destroys `\dur,    0.25`. Leading
+  whitespace only. Trailing whitespace is the editor's, which already trims it.
 - **No tree-sitter.** A language server wants a parser it controls, and the one
   here already knows more than a grammar can: which lowercase word is a
   selector, which is a parameter, and which is a local. That knowledge reaches

@@ -3,6 +3,34 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## [Unreleased]
+
+### Added
+
+- **Formatting.** `textDocument/formatting` and `textDocument/rangeFormatting`,
+  the second being the "re-indent this region" the SuperCollider IDE binds to a
+  key.
+
+  It is an indenter, not a formatter: it rewrites the leading whitespace of a
+  line and never moves a line break. SuperCollider's two most-written idioms
+  are hand-aligned columns — a `Pbind`'s key/value pairs, a `SynthDef`'s UGen
+  arguments — and reflowing either collapses them onto one line or explodes
+  them to one item per line. There is no agreed SuperCollider style to converge
+  on either, so choosing line breaks would mean minting one.
+
+  The editor's own indentation is two regexes, wrong on `"("`, `$(`, `'('` and
+  `// (`, unable to track a nested block comment, and unable to tell `|a, b|`
+  from `a | b`. The parser is wrong about none of them.
+
+  Every answer is relative to an earlier line: a body is one level deeper than
+  the line its bracket opened on, a closing bracket takes that line exactly,
+  and a continuation keeps the offset it already had — so a column you aligned
+  by hand survives and still moves with its block.
+
+  Tabs versus spaces is the editor's `FormattingOptions`, never ours. A file
+  that does not parse is left alone, and silently, because format-on-save runs
+  on every save of a file you are still typing into.
+
 ## [0.9.0] — 2026-09-13
 
 ### Added

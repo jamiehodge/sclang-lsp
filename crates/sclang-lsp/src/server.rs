@@ -318,6 +318,16 @@ impl Server {
                         s.enc,
                     ))
                 }),
+            request::Formatting::METHOD => self.handle::<request::Formatting>(req, |s, p| {
+                let doc = s.docs.get(&p.text_document.uri)?;
+                features::formatting::formatting(doc, &p.options, s.enc)
+            }),
+            request::RangeFormatting::METHOD => {
+                self.handle::<request::RangeFormatting>(req, |s, p| {
+                    let doc = s.docs.get(&p.text_document.uri)?;
+                    features::formatting::range_formatting(doc, p.range, &p.options, s.enc)
+                })
+            }
             request::WorkspaceSymbolRequest::METHOD => self
                 .handle::<request::WorkspaceSymbolRequest>(req, |s, p| {
                     let resolver = Resolver::new(&s.docs, s.enc);
@@ -771,6 +781,10 @@ pub fn capabilities(enc: PositionEncoding) -> ServerCapabilities {
         selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
         workspace_symbol_provider: Some(OneOf::Left(true)),
+        // An indenter rather than a formatter: it rewrites leading whitespace
+        // and never moves a line break. See `features::formatting`.
+        document_formatting_provider: Some(OneOf::Left(true)),
+        document_range_formatting_provider: Some(OneOf::Left(true)),
         ..Default::default()
     }
 }

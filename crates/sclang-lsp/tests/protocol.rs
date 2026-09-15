@@ -21,6 +21,22 @@ fn initialize_advertises_what_it_implements() {
     );
     let _: Option<WorkspaceSymbolResponse> =
         h.request("workspace/symbol", serde_json::json!({ "query": "Sin" }));
+    let _: Option<Vec<TextEdit>> = h.request(
+        "textDocument/formatting",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "options": { "tabSize": 4, "insertSpaces": true },
+        }),
+    );
+    let _: Option<Vec<TextEdit>> = h.request(
+        "textDocument/rangeFormatting",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "range": { "start": { "line": 0, "character": 0 },
+                       "end": { "line": 0, "character": 0 } },
+            "options": { "tabSize": 4, "insertSpaces": true },
+        }),
+    );
 }
 
 #[test]
@@ -263,7 +279,10 @@ fn closing_a_buffer_falls_back_to_what_is_on_disk() {
 #[test]
 fn an_unknown_request_is_an_error_not_a_crash() {
     let mut h = Harness::start("unknown", &mini_library());
-    let id = h.send_request("textDocument/formatting", serde_json::json!({}));
+    // Deliberately not implemented: on-type formatting has to run on a tree
+    // that is mid-edit and therefore broken. `textDocument/formatting` is
+    // handled, so it cannot stand in here.
+    let id = h.send_request("textDocument/onTypeFormatting", serde_json::json!({}));
     let response = h.await_response(id);
     assert!(response.error.is_some());
 
@@ -828,6 +847,88 @@ fn folding_ranges_cover_a_region_that_has_no_indentation() {
     let lines: Vec<_> = folds.iter().map(|f| (f.start_line, f.end_line)).collect();
     assert!(lines.contains(&(0, 4)), "the first region: {lines:?}");
     assert!(lines.contains(&(6, 8)), "the second region: {lines:?}");
+}
+
+#[test]
+fn formatting_indents_a_region() {
+    let mut h = Harness::start("format", &mini_library());
+    let source = "(\nvar x = 1;\nSinOsc.ar(\n440\n);\n)\n";
+    let uri = h.open("Test.scd", source);
+    let _ = h.await_diagnostics(&uri);
+
+    let edits: Vec<TextEdit> = h.request(
+        "textDocument/formatting",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "options": { "tabSize": 4, "insertSpaces": true },
+        }),
+    );
+    assert_eq!(
+        apply_text_edits(source, &edits),
+        "(\n    var x = 1;\n    SinOsc.ar(\n        440\n    );\n)\n",
+        "{edits:?}"
+    );
+}
+
+#[test]
+fn formatting_leaves_a_file_with_syntax_errors_alone() {
+    let mut h = Harness::start("format-broken", &mini_library());
+    let uri = h.open("Test.scd", "(\nvar x = {{{ ;\n)\n");
+    let _ = h.await_diagnostics(&uri);
+
+    // Silence rather than a guess: the tree cannot say where anything belongs,
+    // and the diagnostics already report why.
+    let edits: Option<Vec<TextEdit>> = h.request(
+        "textDocument/formatting",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "options": { "tabSize": 4, "insertSpaces": true },
+        }),
+    );
+    assert_eq!(edits, None, "{edits:?}");
+}
+
+#[test]
+fn range_formatting_only_touches_the_selected_lines() {
+    let mut h = Harness::start("format-range", &mini_library());
+    let source = "(\nvar x = 1;\nvar y = 2;\nvar z = 3;\n)\n";
+    let uri = h.open("Test.scd", source);
+    let _ = h.await_diagnostics(&uri);
+
+    let edits: Vec<TextEdit> = h.request(
+        "textDocument/rangeFormatting",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "range": { "start": { "line": 2, "character": 0 },
+                       "end": { "line": 2, "character": 10 } },
+            "options": { "tabSize": 4, "insertSpaces": true },
+        }),
+    );
+    assert_eq!(
+        apply_text_edits(source, &edits),
+        "(\nvar x = 1;\n    var y = 2;\nvar z = 3;\n)\n",
+        "{edits:?}"
+    );
+}
+
+/// Apply text edits the way a client does. The server never sends overlapping
+/// edits, so applying them back to front keeps every offset valid.
+fn apply_text_edits(source: &str, edits: &[TextEdit]) -> String {
+    let starts: Vec<usize> = std::iter::once(0)
+        .chain(source.match_indices('\n').map(|(i, _)| i + 1))
+        .collect();
+    let offset = |p: Position| starts[p.line as usize] + p.character as usize;
+
+    let mut out = source.to_string();
+    let mut edits = edits.to_vec();
+    edits.sort_by_key(|e| (e.range.start.line, e.range.start.character));
+    for edit in edits.iter().rev() {
+        out.replace_range(
+            offset(edit.range.start)..offset(edit.range.end),
+            &edit.new_text,
+        );
+    }
+    out
 }
 
 #[test]

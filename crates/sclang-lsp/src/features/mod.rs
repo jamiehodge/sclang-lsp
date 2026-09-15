@@ -3,6 +3,7 @@ pub mod diagnostics;
 pub mod document_highlight;
 pub mod find_references;
 pub mod folding_range;
+pub mod formatting;
 pub mod goto;
 pub mod hover;
 pub mod inlay_hints;

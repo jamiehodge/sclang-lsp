@@ -32,6 +32,7 @@ installed at all. It never starts sclang and never talks to one.
 | **Symbols** | Classes with their methods nested, and across the workspace |
 | **Folding** | Regions, class and method bodies, collections and block comments — including the `( … )` idiom indentation folding cannot see |
 | **Selection ranges** | Expand-selection, following the real syntax |
+| **Formatting** | Indentation on save or over a selection. Leading whitespace only: no line break moves, and columns you aligned by hand stay aligned |
 
 Unsaved edits count immediately: a class that exists only in a buffer is
 visible to completion everywhere else. Files that change on disk count too —

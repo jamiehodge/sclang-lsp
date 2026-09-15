@@ -15,12 +15,16 @@
 //! ```
 
 mod grammar;
+mod indent;
 mod kind;
 mod lexer;
 mod parser;
 mod tree;
 
 pub use grammar::Mode;
+pub use indent::{
+    indent_columns, leading_whitespace, line_indents, reindent, IndentStyle, LineIndent,
+};
 pub use kind::SyntaxKind;
 pub use lexer::{tokenize, Lexer, Token};
 pub use tree::{Child, Parse, SyntaxError, SyntaxNode};
