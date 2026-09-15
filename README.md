@@ -60,6 +60,15 @@ Not on the Marketplace yet. To build it yourself, see
 > Disable any other SuperCollider extension first. Two extensions contributing
 > the `supercollider` language means two servers answering every request.
 
+Indentation on save is off until you ask for it:
+
+```json
+"[supercollider]": { "editor.formatOnSave": true }
+```
+
+Otherwise it is **Format Document** and **Format Selection**, on whatever your
+keyboard shortcuts for those are.
+
 ### Claude Code
 
 Claude Code speaks LSP natively, so this is a plugin with no code in it:
@@ -92,7 +101,15 @@ vim.lsp.config.sclang_lsp = {
   root_markers = { ".git" },
 }
 vim.lsp.enable("sclang_lsp")
+
+vim.api.nvim_create_autocmd("BufWritePre", {
+  pattern = { "*.sc", "*.scd" },
+  callback = function() vim.lsp.buf.format() end,
+})
 ```
+
+`gq` works on a selection without any of that: Neovim points `formatexpr` at
+the server when one offers range formatting.
 
 **Emacs**, with eglot. `sclang-mode` comes from
 [scel](https://github.com/supercollider/scel); any major mode will do:
@@ -102,6 +119,10 @@ vim.lsp.enable("sclang_lsp")
 (with-eval-after-load 'eglot
   (add-to-list 'eglot-server-programs '(sclang-mode . ("sclang-lsp"))))
 (add-hook 'sclang-mode-hook #'eglot-ensure)
+
+;; Indent on save. `eglot-format` does a region instead.
+(add-hook 'sclang-mode-hook
+          (lambda () (add-hook 'before-save-hook #'eglot-format-buffer nil t)))
 ```
 
 **Helix**, in `~/.config/helix/languages.toml`. There is no `grammar` entry
@@ -118,7 +139,12 @@ scope = "source.supercollider"
 file-types = ["sc", "scd"]
 comment-token = "//"
 language-servers = ["sclang-lsp"]
+auto-format = true
 ```
+
+Helix indents from tree-sitter queries, and ships none for SuperCollider, so
+this is the only indentation it has for the language rather than a replacement
+for what it was already doing.
 
 Only the VS Code path is exercised here; the three snippets above are offered
 untested, and corrections are welcome.
@@ -151,6 +177,35 @@ compile errors** — sclang prints those before any image exists, so only
 something holding its output can see them. In Neovim and Emacs, `scnvim` and
 `scel` already fill the same role.
 
+## Formatting
+
+An indenter, not a formatter. It rewrites the leading whitespace of a line and
+nothing else, so no line break moves and no column you aligned by hand is
+disturbed:
+
+```supercollider
+Pbind(
+    \degree, Pseq([0, 2, 4], inf),
+    \dur,    0.25
+)
+```
+
+That is deliberate rather than unfinished. SuperCollider's two most-written
+idioms — a `Pbind`'s key/value pairs and a `SynthDef`'s UGen arguments — are
+aligned columns, and every general line-breaking algorithm either collapses
+them onto one line or explodes them to one item per line. There is no agreed
+SuperCollider style to converge on either, so choosing line breaks would mean
+minting one.
+
+A body is one level deeper than the line its bracket opened on, a closing
+bracket takes that line exactly, and a line continuing an expression keeps the
+offset you gave it — so a hand-aligned continuation still moves with its block.
+Tabs or spaces is your editor's setting and never ours.
+
+A file that does not parse is left alone, and says nothing about it. The
+diagnostics already report why, and guessing at the indentation of code whose
+structure could not be read is how a formatter eats your work.
+
 ## What it does not do
 
 **No type inference.** Without types, `x.foo` offers every class defining
@@ -170,6 +225,13 @@ program.
 **No `~envir` completion.** Environment variables live in a running image and
 nothing static can enumerate them. This is the one real capability given up by
 never contacting sclang, and it is worth the exchange.
+
+**Nothing happens as you type.** Formatting is a request an editor makes on
+save or on demand; LSP has no way for a server to contribute indentation rules,
+so the Enter key belongs to VS Code's `language-configuration.json` and to
+tree-sitter `indents.scm` in Helix, Zed and Neovim whatever this server knows.
+Vim's `=` and Emacs' TAB do not route through it either. That is a second
+reason a tree-sitter grammar is worth having.
 
 No SCDoc rendering yet.
 
