@@ -123,7 +123,7 @@ fn outermost(mut candidates: Vec<PathBuf>) -> Vec<PathBuf> {
 
 /// The locations a stock install uses, before configuration is consulted.
 fn platform_roots() -> Vec<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let home = home();
     let mut candidates: Vec<PathBuf> = Vec::new();
 
     if cfg!(target_os = "macos") {
@@ -161,9 +161,8 @@ pub fn sclang_conf_path() -> Option<PathBuf> {
     const NAME: &str = "sclang_conf.yaml";
 
     if cfg!(target_os = "macos") {
-        let home = std::env::var_os("HOME")?;
         Some(
-            PathBuf::from(home)
+            home()?
                 .join("Library/Application Support/SuperCollider")
                 .join(NAME),
         )
@@ -176,7 +175,7 @@ pub fn sclang_conf_path() -> Option<PathBuf> {
         let base = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .filter(|p| p.is_absolute())
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+            .or_else(|| home().map(|h| h.join(".config")))?;
         Some(base.join("SuperCollider").join(NAME))
     }
 }
@@ -274,9 +273,26 @@ fn strip_comment(line: &str) -> &str {
     }
 }
 
+/// The user's home directory.
+///
+/// `HOME` is not set on Windows, where the variable is `USERPROFILE` — so
+/// reading only the first leaves `~/x` unexpanded on exactly the platform
+/// where nothing else would notice.
+fn home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+}
+
 /// One scalar as a path: unquoted, and with a leading `~` expanded, which is
 /// what sclang's own `standardizePath` does to these.
 fn as_path(value: &str) -> PathBuf {
+    expand(value, home().as_deref())
+}
+
+/// The part of [`as_path`] that does not read the environment, so it can be
+/// tested on a machine whose home directory is somewhere else — or nowhere.
+fn expand(value: &str, home: Option<&Path>) -> PathBuf {
     let value = value.trim();
     let value = value
         .strip_prefix('"')
@@ -284,12 +300,11 @@ fn as_path(value: &str) -> PathBuf {
         .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
         .unwrap_or(value);
 
-    match value.strip_prefix("~/") {
-        Some(rest) => match std::env::var_os("HOME") {
-            Some(home) => PathBuf::from(home).join(rest),
-            None => PathBuf::from(value),
-        },
-        None => PathBuf::from(value),
+    match (value.strip_prefix("~/"), home) {
+        (Some(rest), Some(home)) => home.join(rest),
+        // No home to expand against: keep the path as written rather than
+        // inventing one. It will simply not be a directory that exists.
+        _ => PathBuf::from(value),
     }
 }
 
@@ -511,12 +526,34 @@ mod tests {
     }
 
     #[test]
+    fn crlf_line_endings_are_read_the_same() {
+        // A `sclang_conf.yaml` written on Windows has them, and indentation is
+        // exactly what this parser reads — a stray `\r` on the end of a path
+        // would name a directory that does not exist.
+        let parsed = parse_conf("includePaths:\r\n    -   /a\r\nexcludeDefaultPaths: true\r\n");
+        assert_eq!(parsed.include, vec![PathBuf::from("/a")]);
+        assert!(parsed.exclude_defaults);
+    }
+
+    #[test]
     fn a_leading_tilde_is_expanded() {
         // sclang standardizes these paths, so `~/x` names the home directory
-        // rather than a directory called `~`.
-        let parsed = conf(&["includePaths:", "    -   ~/quarks/Mine"]);
-        let home = PathBuf::from(std::env::var_os("HOME").expect("a home directory"));
-        assert_eq!(parsed.include, vec![home.join("quarks/Mine")]);
+        // rather than a directory called `~`. Against an explicit home rather
+        // than the environment's: `HOME` is not set on Windows, where CI runs.
+        let home = PathBuf::from("/somewhere/else");
+        assert_eq!(
+            expand("~/quarks/Mine", Some(&home)),
+            home.join("quarks/Mine")
+        );
+        // Only as a prefix, and only the `~/` form.
+        assert_eq!(expand("/a/~/b", Some(&home)), PathBuf::from("/a/~/b"));
+        assert_eq!(expand("~weird", Some(&home)), PathBuf::from("~weird"));
+        // With nowhere to expand to, the path stays as written rather than
+        // becoming something else.
+        assert_eq!(
+            expand("~/quarks/Mine", None),
+            PathBuf::from("~/quarks/Mine")
+        );
     }
 
     #[test]
