@@ -54,21 +54,26 @@ library, plus installed Extensions and quarks:
 
 ```
 files              : 682
-tokens             : 805,030
+tokens             : 805,110
 error tokens       : 0 (0.0000%)
 lossless (tokens)  : ALL FILES
 ---- parser ----
-files parsed clean : 670 / 680 (98.53%)
+files parsed clean : 674 / 680 (99.12%)
 not valid UTF-8    : 2 (excluded)
 classes found      : 2,075
 methods found      : 12,263
 lossless (tree)    : ALL FILES
 ```
 
-**Every `.sc` class file in the corpus parses.** The 10 remaining failures are
-all `.scd` scripts, and 6 of those have genuinely unbalanced delimiters — files
-sclang rejects too. The rest are example scripts meant to be evaluated block by
-block rather than parsed as a unit.
+**Every `.sc` class file in the corpus parses.** That claim was briefly untrue
+and the sweep is what said so: `ScIDE.sc` ends an array element with a `;`,
+which `exprseq : exprn optsemi` allows and this parser rejected, and six of its
+lines did not parse. Both are fixed.
+
+The 6 remaining failures are all `.scd` scripts, and **sclang rejects every one
+of them too** — asked directly, via `String:compile`. One has genuinely
+unbalanced delimiters; the rest are example scripts meant to be evaluated block
+by block rather than parsed as a unit.
 
 The tree is lossless on *every* file, failures included: error recovery keeps
 the rest of a broken file intact, which is the property that matters in an
@@ -79,8 +84,14 @@ Reproduce with:
 ```bash
 cargo run --release --example conformance -- \
   /Applications/SuperCollider.app/Contents/Resources/SCClassLibrary \
-  ~/Library/Application\ Support/SuperCollider/Extensions
+  ~/Library/Application\ Support/SuperCollider/Extensions \
+  ~/Library/Application\ Support/SuperCollider/downloaded-quarks
 ```
+
+All three roots, because the numbers above are over all three. A quark
+installed outside the usual places — `sclang_conf.yaml` may add any directory —
+is another root again, and passing it is what stops the sweep reporting as
+missing what was simply never read.
 
 Note that lexing is a substantially lower bar than parsing; a clean sweep here
 means the token model is faithful, not that the language is fully handled.

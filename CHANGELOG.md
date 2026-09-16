@@ -70,6 +70,15 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
   within it was cleared by the first one's timer, so the second region barely
   lit up — and ⌘⏎ twice in quick succession is how the thing is used.
 
+- **An array element may end with a `;`.** `arrayelems1 : exprseq` and
+  `exprseq : exprn optsemi`, so the `;` before a `]` is allowed — and it is not
+  a curiosity anyone invented: `ScIDE.sc`, in the stock class library, ends an
+  array element with one, and six of its lines did not parse. Argument lists
+  and event literals already took a trailing `;`; array literals did not. Found
+  by running the conformance sweep against a real install, which is also what
+  confirmed the fix: every `.sc` class file in the corpus parses again, and the
+  six remaining failures are `.scd` scripts that sclang rejects too.
+
 - **`2pi` is a Float, not an Integer.** `floatp : integer pie` — a `pi`
   suffix makes the whole literal a float, and the lexer gives `2pi` as two
   tokens, so reading only the first called it an Integer. It called it that

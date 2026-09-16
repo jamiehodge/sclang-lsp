@@ -816,6 +816,14 @@ fn array_elems(p: &mut Parser) {
             }
         }
 
+        // `arrayelems1 : exprseq` and `exprseq : exprn optsemi`, so an element
+        // may end with a `;`. [`expr_n`] takes one only when another
+        // expression follows it, which leaves the trailing case — and that is
+        // not a curiosity: `ScIDE.sc` in the stock class library ends an array
+        // element with one, so six of its lines did not parse. Argument lists
+        // and event literals already do this.
+        p.eat(Semicolon);
+
         if !p.eat(Comma) {
             break;
         }

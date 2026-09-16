@@ -366,6 +366,26 @@ fn indexing_and_collections() {
 }
 
 #[test]
+fn an_array_element_may_end_with_a_semicolon() {
+    // `arrayelems1 : exprseq` and `exprseq : exprn optsemi`. The `;` before a
+    // `]` is not a typo: `ScIDE.sc` in the stock class library ends an array
+    // element with one, and six of its lines did not parse because of this.
+    // Verified against sclang 3.13 — `"[1, 2;]".compile` returns a Function.
+    for src in [
+        "x = [1, 2;];",
+        "x = [a;];",
+        "x = [\\k: 1;];",
+        "x = [1, 2;, 3];",
+        // The continuation form already worked, and still has to.
+        "x = [a; b];",
+    ] {
+        assert!(parse(src).is_ok(), "{src:?}: {:?}", parse(src).errors);
+    }
+    // One element, not two: the `;` ends the sequence rather than separating.
+    assert_eq!(count("x = [1, 2;];", SyntaxKind::Collection), 1);
+}
+
+#[test]
 fn arithmetic_series_in_all_forms() {
     for src in [
         "x = (1..9);",
