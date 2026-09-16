@@ -4,10 +4,10 @@
 //! chain, a method's signature and the comment above it. SCDoc lives in
 //! separate `.schelp` files and is not read yet.
 
-use crate::analysis::{point_at, resolve_selector, Bias, Point, Receiver};
+use crate::analysis::{enclosing_class_at, point_at, resolve_selector, Bias, Point, Receiver};
 use crate::documents::Document;
 use crate::line_index::PositionEncoding;
-use crate::scope::{locals_at, Local, LocalKind};
+use crate::scope::{class_slot, locals_at, Local, LocalKind, Slot};
 use lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind};
 use sclang_index::{Method, MethodKind, SymbolIndex};
 use std::fmt::Write;
@@ -34,10 +34,19 @@ pub fn hover(
             method_hover(method)
         }
         Point::Local { name } => {
-            let local = locals_at(root, &doc.text, offset)
+            match locals_at(root, &doc.text, offset)
                 .into_iter()
-                .find(|l| l.name == name)?;
-            local_hover(&local)
+                .find(|l| l.name == name)
+            {
+                Some(local) => local_hover(&local),
+                // Not lexically in scope, but a method can see every slot its
+                // class inherits — and those are declared in another class,
+                // usually in another file.
+                None => {
+                    let owner = enclosing_class_at(root, &doc.text, offset)?;
+                    slot_hover(&class_slot(index, &owner, &name)?)
+                }
+            }
         }
         Point::Nothing => return None,
     };
@@ -118,6 +127,34 @@ fn selector_hover(index: &SymbolIndex, name: &str, receiver: &Receiver) -> Optio
         let _ = write!(out, "\n\n---\n{doc}");
     }
     Some(out)
+}
+
+/// An inherited slot, named with the class that declares it.
+///
+/// Where it came from is the useful part: `pattern` in `Pgate` is
+/// `FilterPattern`'s, two classes up, and nothing in the buffer says so.
+fn slot_hover(slot: &Slot<'_>) -> String {
+    let keyword = match slot.kind() {
+        LocalKind::InstanceVar => "var ",
+        LocalKind::ClassVar => "classvar ",
+        LocalKind::Constant => "const ",
+        // A slot is one of those three; the index records no other kind.
+        LocalKind::Argument | LocalKind::Variable => "",
+    };
+    let markers = match (slot.var.getter, slot.var.setter) {
+        (true, true) => "<>",
+        (true, false) => "<",
+        (false, true) => ">",
+        (false, false) => "",
+    };
+
+    let mut out = format!("```supercollider\n{keyword}{markers}{}", slot.var.name);
+    if let Some(default) = &slot.var.default {
+        let _ = write!(out, " = {default}");
+    }
+    out.push_str("\n```");
+    let _ = write!(out, "\n\n*{} of {}*", slot.kind().describe(), slot.owner);
+    out
 }
 
 fn local_hover(local: &Local) -> String {

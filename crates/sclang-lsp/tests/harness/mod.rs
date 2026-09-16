@@ -261,6 +261,27 @@ impl Drop for Harness {
     }
 }
 
+/// A library with a superclass worth inheriting from: slots that subclasses
+/// read, and a method that dispatches back through `this`.
+///
+/// Deliberately several files. The point of both is that the answer is written
+/// in a class the buffer being edited does not contain.
+pub fn animal_library() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("Object.sc", "Object {\n\tpostln { ^this }\n}\n"),
+        (
+            "Animal.sc",
+            "Animal : Object {\n\
+             \tvar <>name, legs;\n\
+             \tclassvar <>census;\n\
+             \tspeak { ^this.sound }\n\
+             \tsound { ^\"...\" }\n\
+             }\n",
+        ),
+        ("Cat.sc", "Cat : Animal {\n\tsound { ^\"meow\" }\n}\n"),
+    ]
+}
+
 /// A miniature class library: enough shape to exercise inheritance without
 /// depending on a SuperCollider install.
 pub fn mini_library() -> Vec<(&'static str, &'static str)> {

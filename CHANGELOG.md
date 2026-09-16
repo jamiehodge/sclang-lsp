@@ -3,6 +3,29 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## [Unreleased]
+
+### Added
+
+- **Inherited class slots.** `Pgate` reads `pattern`, an instance variable
+  declared two classes above it on `FilterPattern` and in another file, so the
+  lexical walk over one buffer never saw it — no hover, no goto, no completion,
+  and the wrong colour. The index had the answer the whole time and nothing
+  asked for it. In the stock class library 2,868 name uses resolve this way:
+  2,717 declared on an ancestor, and 151 a class's own slots read from inside a
+  `+ Foo { }` extension, which declares none of its own.
+
+  Hover names the class the slot comes from, goto follows it into that class's
+  own file, completion offers it with the same label, and semantic tokens paint
+  it as a property. A `var` with no `<` marker generates no accessor, so this
+  is the only way such a slot is reachable at all. Anything the buffer declares
+  still shadows it, exactly as at run time.
+
+  Find-references is deliberately not included. A slot's uses are plain
+  identifiers spread across every subclass in the workspace, and the occurrence
+  index records only class names and selectors; an answer covering the open
+  buffer alone would read as complete and would not be.
+
 ## [0.10.0] — 2026-09-15
 
 ### Added

@@ -29,12 +29,13 @@
 
 use crate::documents::Document;
 use crate::line_index::PositionEncoding;
-use crate::scope::{declared_in, is_scope, Local, LocalKind, PSEUDO_VARIABLES};
+use crate::scope::{class_slots, declared_in, is_scope, Local, LocalKind, PSEUDO_VARIABLES};
 use lsp_types::{
     Range, SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokens,
     SemanticTokensDelta, SemanticTokensEdit, SemanticTokensFullDeltaResult, SemanticTokensLegend,
     Url,
 };
+use sclang_index::SymbolIndex;
 use sclang_syntax::{Child, SyntaxKind, SyntaxNode, Token};
 use std::collections::HashMap;
 
@@ -103,27 +104,40 @@ pub fn legend() -> SemanticTokensLegend {
 ///
 /// Bare tokens, with no result id: labelling a response is [`Cache`]'s job,
 /// because only it knows whether the array can be diffed against later.
-pub fn semantic_tokens(doc: &Document, enc: PositionEncoding) -> Vec<SemanticToken> {
-    tokens_in(doc, 0, doc.text.len() as u32, enc)
+pub fn semantic_tokens(
+    doc: &Document,
+    index: &SymbolIndex,
+    enc: PositionEncoding,
+) -> Vec<SemanticToken> {
+    tokens_in(doc, index, 0, doc.text.len() as u32, enc)
 }
 
 /// The tokens of one span, for a client painting the viewport first.
 pub fn semantic_tokens_range(
     doc: &Document,
+    index: &SymbolIndex,
     range: Range,
     enc: PositionEncoding,
 ) -> Vec<SemanticToken> {
     let from = doc.line_index.offset(&doc.text, range.start, enc);
     let to = doc.line_index.offset(&doc.text, range.end, enc);
-    tokens_in(doc, from, to, enc)
+    tokens_in(doc, index, from, to, enc)
 }
 
-fn tokens_in(doc: &Document, from: u32, to: u32, enc: PositionEncoding) -> Vec<SemanticToken> {
+fn tokens_in(
+    doc: &Document,
+    index: &SymbolIndex,
+    from: u32,
+    to: u32,
+    enc: PositionEncoding,
+) -> Vec<SemanticToken> {
     let mut walker = Walker {
         source: &doc.text,
+        index,
         from,
         to,
         scopes: Vec::new(),
+        slots: Vec::new(),
         out: Vec::new(),
     };
     walker.walk(&doc.parse().root, None);
@@ -262,12 +276,17 @@ struct Span {
 
 struct Walker<'a> {
     source: &'a str,
+    index: &'a SymbolIndex,
     from: u32,
     to: u32,
     /// Innermost scope last. Only the declarations of the scopes actually
     /// enclosing the current node, which is what makes shadowing come out
     /// right and keeps this one pass rather than one lookup per name.
     scopes: Vec<Vec<Local>>,
+    /// The slots of the class being walked, inherited ones included. Not a
+    /// scope: they come from the index rather than the tree, and classes do
+    /// not nest, so one set at a time is all there is.
+    slots: Vec<(String, LocalKind)>,
     out: Vec<Span>,
 }
 
@@ -290,6 +309,22 @@ impl<'a> Walker<'a> {
             // SuperCollider requires declarations at the top of a body, so
             // every name a scope binds is known before any of it is walked.
             self.scopes.push(declared_in(node, self.source));
+        }
+
+        // A class's own slots come from the tree above; the ones it inherits
+        // are written in another class and often another file, and without
+        // them `pattern` in `Pgate` paints as an ordinary variable.
+        let class_scope = matches!(node.kind, SyntaxKind::ClassDef | SyntaxKind::ClassExtension);
+        if class_scope {
+            self.slots = node
+                .token_of(SyntaxKind::ClassName)
+                .map(|t| {
+                    class_slots(self.index, t.text(self.source))
+                        .into_iter()
+                        .map(|s| (s.var.name.clone(), s.kind()))
+                        .collect()
+                })
+                .unwrap_or_default();
         }
 
         for child in &node.children {
@@ -493,11 +528,20 @@ impl<'a> Walker<'a> {
     }
 
     /// The innermost declaration of a name, since that is the one that wins.
+    ///
+    /// Lexical scopes first: an argument named `pattern` shadows the class
+    /// slot of that name, exactly as it does at run time.
     fn lookup(&self, name: &str) -> Option<LocalKind> {
         self.scopes
             .iter()
             .rev()
             .find_map(|frame| frame.iter().find(|l| l.name == name).map(|l| l.kind))
+            .or_else(|| {
+                self.slots
+                    .iter()
+                    .find(|(slot, _)| slot == name)
+                    .map(|(_, kind)| *kind)
+            })
     }
 }
 
@@ -691,13 +735,13 @@ mod tests {
 
     fn tokens(source: &str) -> Vec<Decoded> {
         let doc = Document::new(source.to_string(), 1);
-        let tokens = semantic_tokens(&doc, PositionEncoding::Utf16);
+        let tokens = semantic_tokens(&doc, &SymbolIndex::default(), PositionEncoding::Utf16);
         decode(source, &tokens)
     }
 
     fn script(source: &str) -> Vec<Decoded> {
         let doc = Document::with_mode(source.to_string(), 1, sclang_syntax::Mode::Script);
-        let tokens = semantic_tokens(&doc, PositionEncoding::Utf16);
+        let tokens = semantic_tokens(&doc, &SymbolIndex::default(), PositionEncoding::Utf16);
         decode(source, &tokens)
     }
 
@@ -983,7 +1027,7 @@ mod tests {
         // span silently corrupts every token after it.
         let source = "// lead\nFoo : Bar {\n\tclassvar <all;\n\t*new { |n = 4|\n\t\t^super.new.init(n)\n\t}\n\tinit { |n| all = all ++ [n]; ^this }\n}\n";
         let doc = Document::new(source.to_string(), 1);
-        let tokens = semantic_tokens(&doc, PositionEncoding::Utf16);
+        let tokens = semantic_tokens(&doc, &SymbolIndex::default(), PositionEncoding::Utf16);
         for token in &tokens {
             if token.delta_line == 0 {
                 // Two tokens on one line may touch but never overlap or
@@ -1006,9 +1050,9 @@ mod tests {
         // the comment token past the end of the line.
         let source = "// 🎛\nFoo { }";
         let doc = Document::new(source.to_string(), 1);
-        let utf16 = semantic_tokens(&doc, PositionEncoding::Utf16);
+        let utf16 = semantic_tokens(&doc, &SymbolIndex::default(), PositionEncoding::Utf16);
         assert_eq!(utf16[0].length, 5);
-        let utf8 = semantic_tokens(&doc, PositionEncoding::Utf8);
+        let utf8 = semantic_tokens(&doc, &SymbolIndex::default(), PositionEncoding::Utf8);
         assert_eq!(utf8[0].length, 7);
     }
 
@@ -1017,7 +1061,12 @@ mod tests {
         let source = "Foo { }\nBar { }\n";
         let doc = Document::new(source.to_string(), 1);
         let second_line = Range::new(Position::new(1, 0), Position::new(1, 7));
-        let tokens = semantic_tokens_range(&doc, second_line, PositionEncoding::Utf16);
+        let tokens = semantic_tokens_range(
+            &doc,
+            &SymbolIndex::default(),
+            second_line,
+            PositionEncoding::Utf16,
+        );
         assert_eq!(pairs(&decode(source, &tokens)), vec![("Bar", "class")]);
     }
 
@@ -1028,7 +1077,12 @@ mod tests {
         let source = "{ |freq|\n\n\tfreq\n}";
         let doc = Document::new(source.to_string(), 1);
         let third_line = Range::new(Position::new(2, 0), Position::new(2, 5));
-        let tokens = semantic_tokens_range(&doc, third_line, PositionEncoding::Utf16);
+        let tokens = semantic_tokens_range(
+            &doc,
+            &SymbolIndex::default(),
+            third_line,
+            PositionEncoding::Utf16,
+        );
         assert_eq!(pairs(&decode(source, &tokens)), vec![("freq", "parameter")]);
     }
 
@@ -1067,7 +1121,7 @@ mod tests {
             PositionEncoding::Utf16,
             PositionEncoding::Utf32,
         ] {
-            let tokens = semantic_tokens(&doc, enc);
+            let tokens = semantic_tokens(&doc, &SymbolIndex::default(), enc);
             let (mut line, mut character) = (0, 0);
             let mut previous_end = 0;
 
@@ -1170,7 +1224,7 @@ mod tests {
     /// The tokens of a script, as the cache would be handed them.
     fn tokens_of(source: &str) -> Vec<SemanticToken> {
         let doc = Document::with_mode(source.to_string(), 1, sclang_syntax::Mode::Script);
-        semantic_tokens(&doc, PositionEncoding::Utf16)
+        semantic_tokens(&doc, &SymbolIndex::default(), PositionEncoding::Utf16)
     }
 
     fn five(token: &SemanticToken) -> [u32; 5] {

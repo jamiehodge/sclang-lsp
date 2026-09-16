@@ -5,10 +5,10 @@
 //! to every implementor, and the protocol's array response is the right shape
 //! for saying so.
 
-use crate::analysis::{point_at, resolve_selector, Bias, Point};
+use crate::analysis::{enclosing_class_at, point_at, resolve_selector, Bias, Point};
 use crate::documents::Document;
 use crate::locations::Resolver;
-use crate::scope::locals_at;
+use crate::scope::{class_slot, locals_at};
 use lsp_types::{GotoDefinitionResponse, Url};
 use sclang_index::SymbolIndex;
 
@@ -40,19 +40,30 @@ pub fn goto_definition(
             .filter_map(|m| resolver.resolve(&m.location))
             .collect(),
 
-        // A local never leaves the buffer it is written in, so the whole
-        // answer is in the tree already in hand.
-        Point::Local { name } => locals_at(&doc.parse().root, &doc.text, offset)
-            .into_iter()
-            // Innermost first, so the first match is the binding in force.
-            .find(|l| l.name == name)
-            // A pseudo-variable like `this` is bound by the compiler and
-            // written down nowhere, so it has an empty range and nothing to
-            // jump to.
-            .filter(|l| l.name_range.end > l.name_range.start)
-            .map(|l| resolver.in_document(uri, doc, l.name_range))
-            .into_iter()
-            .collect(),
+        // A lexical binding never leaves the buffer it is written in, so the
+        // whole answer is in the tree already in hand. An inherited class slot
+        // does leave it, which is the one case that has to ask the index.
+        Point::Local { name } => {
+            let root = &doc.parse().root;
+            let lexical = locals_at(root, &doc.text, offset)
+                .into_iter()
+                // Innermost first, so the first match is the binding in force.
+                .find(|l| l.name == name)
+                // A pseudo-variable like `this` is bound by the compiler and
+                // written down nowhere, so it has an empty range and nothing
+                // to jump to.
+                .filter(|l| l.name_range.end > l.name_range.start)
+                .map(|l| resolver.in_document(uri, doc, l.name_range));
+
+            lexical
+                .or_else(|| {
+                    let owner = enclosing_class_at(root, &doc.text, offset)?;
+                    let slot = class_slot(index, &owner, &name)?;
+                    resolver.resolve(&slot.var.location)
+                })
+                .into_iter()
+                .collect()
+        }
 
         // The cursor is already on the definition. Offering to jump to it is
         // noise, so say nothing.

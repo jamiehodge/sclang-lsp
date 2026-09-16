@@ -5,9 +5,9 @@
 //! not, this returns every class that defines the selector rather than
 //! guessing — see "Deliberately not done" in ARCHITECTURE.md.
 
-use crate::analysis::{call_at, resolve_selector, token_at, Bias, Receiver};
+use crate::analysis::{call_at, enclosing_class_at, resolve_selector, token_at, Bias, Receiver};
 use crate::documents::Document;
-use crate::scope::{locals_at, Local, LocalKind};
+use crate::scope::{class_slots, locals_at, Local, LocalKind, Slot};
 use sclang_index::{Method, MethodKind, SymbolIndex};
 use sclang_syntax::{SyntaxKind, SyntaxNode};
 
@@ -155,9 +155,23 @@ pub fn completion(doc: &Document, index: &SymbolIndex, offset: u32) -> Completio
             // Names the user wrote themselves come first. Before this, typing
             // `fr` inside a method that declares `freq` offered sixty global
             // selectors and not the one name actually in scope.
-            for local in locals_at(&doc.parse().root, &doc.text, offset) {
+            let root = &doc.parse().root;
+            let locals = locals_at(root, &doc.text, offset);
+            for local in &locals {
                 if local.name.starts_with(&prefix) {
-                    items.push(local_item(&local));
+                    items.push(local_item(local));
+                }
+            }
+            // Slots the class inherits are in scope just as its own are, and
+            // a `var` with no `<` marker generates no accessor, so this is the
+            // only way they are offered at all.
+            if let Some(owner) = enclosing_class_at(root, &doc.text, offset) {
+                for slot in class_slots(index, &owner) {
+                    if slot.var.name.starts_with(&prefix)
+                        && !locals.iter().any(|l| l.name == slot.var.name)
+                    {
+                        items.push(slot_item(&slot));
+                    }
                 }
             }
             let before = items.len();
@@ -254,6 +268,24 @@ fn push_keyword_args(
             sort_text: Some(format!("0{}", arg.name)),
             ..Default::default()
         });
+    }
+}
+
+/// An inherited class slot, labelled with the class it comes from.
+fn slot_item(slot: &Slot<'_>) -> CompletionItem {
+    let kind = slot.kind();
+    let mut detail = format!("{} of {}", kind.describe(), slot.owner);
+    if let Some(default) = &slot.var.default {
+        detail.push_str(&format!(" = {default}"));
+    }
+    CompletionItem {
+        label: slot.var.name.clone(),
+        kind: Some(match kind {
+            LocalKind::Constant => CompletionItemKind::CONSTANT,
+            _ => CompletionItemKind::FIELD,
+        }),
+        detail: Some(detail),
+        ..Default::default()
     }
 }
 

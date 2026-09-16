@@ -5,10 +5,14 @@
 //! just written were invisible to completion — and worse than invisible, since
 //! the list filled with globals that merely shared a prefix.
 //!
-//! Everything here comes from the syntax tree of the open buffer alone. There
-//! is nothing to index and nothing to invalidate.
+//! Lexical scope comes from the syntax tree of the open buffer alone: there is
+//! nothing to index and nothing to invalidate. One kind of name escapes that,
+//! and it is the last part of this module — a class's slots are visible to
+//! every subclass, which is inheritance rather than nesting, so finding them
+//! means asking the index.
 
 use crate::analysis::ancestors_at;
+use sclang_index::{SymbolIndex, Var, VarKind};
 use sclang_syntax::{SyntaxKind, SyntaxNode};
 use std::ops::Range;
 
@@ -28,6 +32,15 @@ pub enum LocalKind {
 }
 
 impl LocalKind {
+    /// The same three-way split the index records on a class slot.
+    pub fn of_slot(kind: VarKind) -> Self {
+        match kind {
+            VarKind::Instance => LocalKind::InstanceVar,
+            VarKind::Class => LocalKind::ClassVar,
+            VarKind::Const => LocalKind::Constant,
+        }
+    }
+
     pub fn describe(self) -> &'static str {
         match self {
             LocalKind::Argument => "argument",
@@ -218,6 +231,59 @@ fn push_unique(out: &mut Vec<Local>, local: Local) {
     if !out.iter().any(|l| l.name == local.name) {
         out.push(local);
     }
+}
+
+/// A slot visible inside a class's methods, and the class that declares it.
+///
+/// The declaring class is the whole point: it is usually not the one being
+/// looked at, and saying which one it is turns "some variable" into a fact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Slot<'a> {
+    /// The class the slot is written on, which may be an ancestor.
+    pub owner: &'a str,
+    pub var: &'a Var,
+}
+
+impl Slot<'_> {
+    pub fn kind(&self) -> LocalKind {
+        LocalKind::of_slot(self.var.kind)
+    }
+}
+
+/// Every slot visible inside `owner`'s methods: its own, and every one it
+/// inherits.
+///
+/// SuperCollider's class slots are not lexical. `Pgate` reads `pattern`,
+/// declared two classes above it on `FilterPattern` and quite possibly in
+/// another file, so [`locals_at`] — which walks the tree of one buffer — never
+/// sees it. This is the half that has to ask the index.
+///
+/// Nearest class first. A subclass cannot redeclare an inherited slot, so that
+/// is ordering rather than shadowing, but it is what decides which class gets
+/// named.
+pub fn class_slots<'a>(index: &'a SymbolIndex, owner: &str) -> Vec<Slot<'a>> {
+    let mut out: Vec<Slot<'a>> = Vec::new();
+    for class in index.superclass_chain(owner) {
+        for var in &class.vars {
+            if !out.iter().any(|s| s.var.name == var.name) {
+                out.push(Slot {
+                    owner: &class.name,
+                    var,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// One slot by name, if `owner` declares or inherits it.
+pub fn class_slot<'a>(index: &'a SymbolIndex, owner: &str, name: &str) -> Option<Slot<'a>> {
+    index.superclass_chain(owner).into_iter().find_map(|class| {
+        class.vars.iter().find(|v| v.name == name).map(|var| Slot {
+            owner: &class.name,
+            var,
+        })
+    })
 }
 
 #[cfg(test)]

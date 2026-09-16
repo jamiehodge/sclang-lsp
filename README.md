@@ -21,14 +21,14 @@ installed at all. It never starts sclang and never talks to one.
 | **Diagnostics** | Syntax errors, per keystroke |
 | **Completion** | Parameter names inside a call, then names in scope, then class names. Class-side methods after `Foo.`, inherited ones included |
 | **Signature help** | The call being typed, with the current parameter marked. `name:` selects its own parameter rather than its position |
-| **Hover** | Signature, superclass chain, and the comment above the definition. For a local, what kind of binding it is and its default |
-| **Goto-definition** | Exact for a class, a class receiver or a local; every implementor otherwise |
+| **Hover** | Signature, superclass chain, and the comment above the definition. For a local, what kind of binding it is and its default; for a slot a class inherits, which class it comes from |
+| **Goto-definition** | Exact for a class, a class receiver, a local or an inherited class slot; every implementor otherwise |
 | **Goto-implementation** | Every class defining a selector; on a class name, its subclasses |
 | **Find references** | Exact for a local or a class name; textual for a selector, since dispatch is dynamic |
 | **Document highlight** | The other places a name is written in this file, with the declaration marked |
 | **Rename** | Function locals and class names — everything whose uses can be enumerated completely |
 | **Inlay hints** | The parameter each positional argument fills |
-| **Semantic tokens** | Colour from the parse tree: a selector is a method, a name declared as `arg` stays a parameter wherever it appears. `full`, `range` and `full/delta` |
+| **Semantic tokens** | Colour from the parse tree: a selector is a method, a name declared as `arg` stays a parameter wherever it appears, and a slot inherited from a superclass is a property. `full`, `range` and `full/delta` |
 | **Symbols** | Classes with their methods nested, and across the workspace |
 | **Folding** | Regions, class and method bodies, collections and block comments — including the `( … )` idiom indentation folding cannot see |
 | **Selection ranges** | Expand-selection, following the real syntax |
@@ -213,6 +213,12 @@ structure could not be read is how a formatter eats your work.
 go further and stay silent unless the receiver is a literal class name: both
 render as though they were in the source, and a guess there would read as a
 fact.
+
+**No references for an inherited class slot.** Hover and goto will tell you
+where `pattern` is declared; find-references will not enumerate who reads it.
+Its uses are ordinary identifiers spread across every subclass in the
+workspace, and the occurrence index records only class names and selectors. An
+answer covering the open buffer alone would read as complete and would not be.
 
 **Rename refuses methods**, and says why. `.play` is dispatched at run time, so
 nothing distinguishes one class's `play` from another's, and rewriting every

@@ -397,7 +397,7 @@ fn classify(path: &TokenPath<'_>, source: &str) -> Point {
                 // `bar { ... }` inside a class body.
                 SyntaxKind::MethodDef => Point::MethodName {
                     name: text,
-                    owner: owner_of(path, source),
+                    owner: enclosing_class(&path.ancestors, source),
                 },
                 // A bare name used as a value, or the name being declared.
                 // Both want the same answer: where this binding comes from.
@@ -412,10 +412,17 @@ fn classify(path: &TokenPath<'_>, source: &str) -> Point {
     }
 }
 
-/// The class a method definition belongs to, walking out to the enclosing
-/// `ClassDef` or `+ Foo` extension.
-fn owner_of(path: &TokenPath<'_>, source: &str) -> Option<String> {
-    path.ancestors
+/// The class whose body contains `offset`, defined or extended.
+pub fn enclosing_class_at(root: &SyntaxNode, source: &str, offset: u32) -> Option<String> {
+    enclosing_class(&ancestors_at(root, offset), source)
+}
+
+/// The same, from a path that has already been walked.
+///
+/// What a method definition belongs to, and equally what a class slot written
+/// anywhere above is in scope for.
+pub fn enclosing_class(ancestors: &[&SyntaxNode], source: &str) -> Option<String> {
+    ancestors
         .iter()
         .rev()
         .find(|n| matches!(n.kind, SyntaxKind::ClassDef | SyntaxKind::ClassExtension))

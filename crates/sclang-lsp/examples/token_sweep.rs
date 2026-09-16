@@ -20,6 +20,7 @@
 //! Exits 2 if any file violates a property, naming the first one per file.
 
 use lsp_types::Position;
+use sclang_index::SymbolIndex;
 use sclang_lsp::documents::Document;
 use sclang_lsp::features::semantic_tokens::{legend, semantic_tokens};
 use sclang_lsp::line_index::{LineIndex, PositionEncoding};
@@ -54,7 +55,7 @@ fn check(source: &str, mode: Mode) -> Result<usize, String> {
     let mut counted = 0;
 
     for enc in [PositionEncoding::Utf8, PositionEncoding::Utf16] {
-        let tokens = semantic_tokens(&doc, enc);
+        let tokens = semantic_tokens(&doc, &SymbolIndex::default(), enc);
         counted = tokens.len();
         let (mut line, mut character) = (0, 0);
         let mut previous_end = 0;

@@ -276,22 +276,23 @@ impl Server {
                 .handle::<request::SemanticTokensFullRequest>(req, |s, p| {
                     let uri = p.text_document.uri;
                     let doc = s.docs.get(&uri)?;
-                    let tokens = features::semantic_tokens::semantic_tokens(doc, s.enc);
+                    let tokens = features::semantic_tokens::semantic_tokens(doc, &s.index, s.enc);
                     Some(s.tokens.full(&uri, tokens).into())
                 }),
             request::SemanticTokensFullDeltaRequest::METHOD => {
                 self.handle::<request::SemanticTokensFullDeltaRequest>(req, |s, p| {
                     let uri = p.text_document.uri;
                     let doc = s.docs.get(&uri)?;
-                    let tokens = features::semantic_tokens::semantic_tokens(doc, s.enc);
+                    let tokens = features::semantic_tokens::semantic_tokens(doc, &s.index, s.enc);
                     Some(s.tokens.delta(&uri, &p.previous_result_id, tokens))
                 })
             }
             request::SemanticTokensRangeRequest::METHOD => self
                 .handle::<request::SemanticTokensRangeRequest>(req, |s, p| {
                     let doc = s.docs.get(&p.text_document.uri)?;
-                    let data =
-                        features::semantic_tokens::semantic_tokens_range(doc, p.range, s.enc);
+                    let data = features::semantic_tokens::semantic_tokens_range(
+                        doc, &s.index, p.range, s.enc,
+                    );
                     // No result id. A range covers part of a document, so it
                     // can never be the thing a later delta is measured
                     // against, and labelling it would invite exactly that.

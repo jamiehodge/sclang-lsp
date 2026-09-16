@@ -2,7 +2,7 @@
 
 mod harness;
 
-use harness::{mini_library, Harness};
+use harness::{animal_library, mini_library, Harness};
 use lsp_types::*;
 
 #[test]
@@ -1377,4 +1377,94 @@ fn a_block_after_a_class_name_depends_on_the_file() {
         !in_class.diagnostics.is_empty(),
         "in a .sc file that is a class definition with a bad body"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Inherited class slots
+// ---------------------------------------------------------------------------
+
+/// The line and column of `needle` in `text`, so a test never hand-counts a
+/// tab. Points one character in, which every bias treats as inside the token.
+fn at(text: &str, needle: &str) -> (u32, u32) {
+    let offset = text.find(needle).unwrap_or_else(|| panic!("no {needle:?}"));
+    let line = text[..offset].matches('\n').count() as u32;
+    let column = offset - text[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    (line, column as u32 + 1)
+}
+
+/// The buffer defines `Dog`; `Animal`, `Cat` and `Object` are in the library.
+fn dog(h: &mut Harness, body: &str) -> (Url, String) {
+    let text = format!("Dog : Animal {{\n\t{body}\n}}\n");
+    (h.open("Dog.sc", &text), text)
+}
+
+#[test]
+fn hover_names_the_class_an_inherited_slot_comes_from() {
+    let mut h = Harness::start("slot-hover", &animal_library());
+    // `legs` carries no accessor marker, so it exists only as a slot — there
+    // is no generated method for it to be found as instead.
+    let (uri, text) = dog(&mut h, "count { ^legs }");
+    let (line, column) = at(&text, "legs }");
+
+    let hover: Hover = h.request_at("textDocument/hover", &uri, line, column);
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markup");
+    };
+    assert!(markup.value.contains("legs"), "{}", markup.value);
+    assert!(
+        markup.value.contains("instance variable of Animal"),
+        "{}",
+        markup.value
+    );
+}
+
+#[test]
+fn goto_definition_follows_an_inherited_slot_into_its_own_file() {
+    let mut h = Harness::start("slot-goto", &animal_library());
+    let (uri, text) = dog(&mut h, "count { ^legs }");
+    let (line, column) = at(&text, "legs }");
+
+    let response: GotoDefinitionResponse =
+        h.request_at("textDocument/definition", &uri, line, column);
+    let GotoDefinitionResponse::Scalar(location) = response else {
+        panic!("expected exactly one definition, got {response:?}");
+    };
+    assert!(
+        location.uri.path().ends_with("Animal.sc"),
+        "{:?}",
+        location.uri
+    );
+}
+
+#[test]
+fn completion_offers_inherited_slots() {
+    let mut h = Harness::start("slot-complete", &animal_library());
+    let (uri, text) = dog(&mut h, "count { ^le }");
+    let (line, column) = at(&text, "le }");
+
+    let response: CompletionResponse =
+        h.request_at("textDocument/completion", &uri, line, column + 1);
+    let items = match response {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    let legs = items
+        .iter()
+        .find(|i| i.label == "legs")
+        .unwrap_or_else(|| panic!("no `legs` in {items:?}"));
+    assert_eq!(legs.detail.as_deref(), Some("instance variable of Animal"));
+}
+
+#[test]
+fn a_local_shadows_an_inherited_slot() {
+    let mut h = Harness::start("slot-shadow", &animal_library());
+    let (uri, text) = dog(&mut h, "count { |legs| ^legs }");
+    let (line, column) = at(&text, "legs }");
+
+    let hover: Hover = h.request_at("textDocument/hover", &uri, line, column);
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markup");
+    };
+    assert!(markup.value.contains("argument"), "{}", markup.value);
+    assert!(!markup.value.contains("Animal"), "{}", markup.value);
 }
