@@ -5,6 +5,7 @@ oracle/sc_lexer/src/
 oracle/sc_lexer_dump
 editors/*/node_modules/
 editors/*/out/
+editors/*/dist/
 editors/*/*.vsix
 editors/vscode/server/
 oracle/oracle-resolution.tsv

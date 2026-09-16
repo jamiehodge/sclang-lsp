@@ -1,6 +1,16 @@
+# What ships is the bundle, the server binary, and the files VS Code reads
+# from `contributes`. Everything else is build input.
+#
+# `node_modules` in particular: esbuild inlines `vscode-languageclient` and its
+# dependencies into `dist/extension.js`, so shipping them again would be 315
+# files of the same code. `out/` is the tsc build, which exists to typecheck
+# and to run the tests — `main` points at the bundle.
 .vscode/**
 src/**
-out/test/**
+out/**
+dist/**/*.map
+node_modules/**
 scripts/**
 tsconfig.json
 **/*.map
+**/*.vsix

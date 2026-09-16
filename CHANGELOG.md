@@ -3,6 +3,24 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## Unreleased
+
+### Changed
+
+- **The VS Code extension is bundled.** `vscode-languageclient` and its
+  dependencies were 315 files of JavaScript shipped alongside a seven-file
+  build of the extension itself; esbuild inlines them into one. The `.vsix`
+  goes from 334 files to 13, and from 1.49 MB to 1.13 MB.
+
+  Not minified. The saving would be about 440 KB against a package the 2.8 MB
+  server binary already dominates, and the cost is a stack trace nobody can
+  read in a user's log — which is where this extension has to explain what
+  sclang did.
+
+  `tsc` still runs, and still runs first: esbuild strips types without checking
+  them, so `vscode:prepublish` typechecks before it bundles and the tests keep
+  running against `out/`.
+
 ## [0.12.0] — 2026-09-16
 
 ### Added

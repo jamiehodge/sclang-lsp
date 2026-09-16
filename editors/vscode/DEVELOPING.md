@@ -89,6 +89,35 @@ installing from the Marketplace or the releases page gets the right one.
 `scripts/bundle-server.js` takes an optional directory for that, since a cross
 compile lands in `target/<triple>/release` rather than `target/release`.
 
+## Two builds, and why
+
+`tsc` and esbuild both turn `src/` into JavaScript, and both are wanted:
+
+| | |
+|---|---|
+| `npm run compile` | `tsc` into `out/`. Typechecks, and is what the tests run against. |
+| `npm run bundle` | esbuild into `dist/extension.js`. One file, which is what `main` points at and what ships. |
+
+esbuild strips types without checking them, so it is never the only step:
+`vscode:prepublish` runs `compile` first, and a type error fails the package
+rather than being bundled past. The F5 task depends on `compile` for the same
+reason.
+
+Bundling is what keeps the `.vsix` to 13 files. `vscode-languageclient` and its
+dependencies are 315 files of JavaScript that get inlined into the one, so
+`.vscodeignore` drops `node_modules` entirely — nothing in the bundle requires
+anything but Node builtins and `vscode`.
+
+It is deliberately not minified. The saving is about 440 KB against a package
+the 2.8 MB server binary already dominates, and the cost would be a stack trace
+nobody can read in the one place — a user's log — where this extension has to
+explain what sclang did.
+
+`bundle:dev` adds a source map so F5 breakpoints land in the TypeScript. The
+published bundle has none: the map is build output, `.vscodeignore` drops it,
+and shipping the reference without the file would be a dangling
+`sourceMappingURL`.
+
 ## Layout
 
 | | |
