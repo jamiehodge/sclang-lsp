@@ -102,7 +102,7 @@ competing with it for CPU.
 | Setting | Effect |
 |---|---|
 | `sclang-lsp.server.path` | Absolute path to the server binary. Defaults to the copy bundled here. |
-| `sclang-lsp.classLibraryPaths` | Index these directories instead of the platform defaults. |
+| `sclang-lsp.classLibraryPaths` | Index these directories instead of the platform defaults and `sclang_conf.yaml`. |
 | `sclang-lsp.trace.server` | Log LSP traffic — `messages` or `verbose`. |
 | `sclang-lsp.sclang.path` | Absolute path to `sclang`. Empty means the usual place for your platform, then `PATH`. |
 | `sclang-lsp.sclang.args` | Extra arguments for `sclang`. Do not override `-i`: under any IDE name but `none`, sclang never reads stdin and evaluation silently does nothing. |

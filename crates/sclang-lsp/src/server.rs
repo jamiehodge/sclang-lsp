@@ -10,7 +10,7 @@ use crate::features;
 use crate::line_index::PositionEncoding;
 use crate::locations::Resolver;
 use crate::references::ReferenceIndex;
-use crate::workspace::{build_index, default_roots, IndexStats};
+use crate::workspace::{build_index, default_roots, IndexStats, Roots};
 
 use crossbeam_channel::{Receiver, Sender};
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
@@ -671,7 +671,7 @@ fn negotiate_encoding(params: &InitializeParams) -> PositionEncoding {
 
 /// Where to look for code: the stock class library plus whatever the editor
 /// opened. Both are indexed the same way — there is no privileged source.
-fn roots_from(params: &InitializeParams) -> Vec<PathBuf> {
+fn roots_from(params: &InitializeParams) -> Roots {
     // An explicit setting replaces the guessed locations rather than adding to
     // them, so a user pointing at one SuperCollider build does not silently
     // get a second one's class library merged in.
@@ -688,7 +688,13 @@ fn roots_from(params: &InitializeParams) -> Vec<PathBuf> {
                 .collect::<Vec<_>>()
         });
 
-    let mut roots = configured.unwrap_or_else(default_roots);
+    // An explicit setting replaces everything guessed *and* everything
+    // `sclang_conf.yaml` adds: a user pointing at one build should not get a
+    // second one's class library merged in through the back door.
+    let mut roots = match configured {
+        Some(paths) => Roots::of(paths),
+        None => default_roots(),
+    };
 
     #[allow(deprecated)] // `root_uri` predates workspace folders but is still sent.
     let folders = params
@@ -700,12 +706,12 @@ fn roots_from(params: &InitializeParams) -> Vec<PathBuf> {
 
     for uri in folders {
         if let Ok(path) = uri.to_file_path() {
-            roots.push(path);
+            roots.include.push(path);
         }
     }
 
-    roots.sort();
-    roots.dedup();
+    roots.include.sort();
+    roots.include.dedup();
     roots
 }
 

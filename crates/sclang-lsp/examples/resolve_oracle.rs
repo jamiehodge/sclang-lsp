@@ -13,7 +13,7 @@
 //!     cargo run --release --example resolve_oracle -- <dump.tsv> [dir...]
 
 use sclang_lsp::analysis::{resolve_selector, Certainty, Receiver};
-use sclang_lsp::workspace::{build_index, default_roots};
+use sclang_lsp::workspace::{build_index, default_roots, Roots};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -31,7 +31,7 @@ fn main() {
     let roots = if given.is_empty() {
         default_roots()
     } else {
-        given
+        Roots::of(given)
     };
 
     eprintln!("indexing {} root(s)...", roots.len());

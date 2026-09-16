@@ -115,7 +115,7 @@
             "type": "string"
           },
           "default": [],
-          "markdownDescription": "Directories to index instead of the platform defaults. Leave empty to let the server find the stock class library, `Extensions` and `downloaded-quarks` itself."
+          "markdownDescription": "Directories to index instead of the platform defaults. Leave empty to let the server find the stock class library, `Extensions`, `downloaded-quarks` and whatever `sclang_conf.yaml` adds."
         },
         "sclang-lsp.trace.server": {
           "type": "string",

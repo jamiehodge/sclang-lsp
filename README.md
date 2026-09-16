@@ -154,8 +154,12 @@ every client, and a client that does not consume them simply never asks; one
 that has a grammar of its own layers ours over it rather than replacing it.
 
 The class library is found automatically, along with `Extensions` and
-`downloaded-quarks`. To point somewhere else — a non-standard install, or a
-build tree — pass paths in `initializationOptions`:
+`downloaded-quarks` — and with whatever `sclang_conf.yaml` adds, which is
+where a quark checked out somewhere of your own is named. That file is how
+sclang itself is told what to compile, so reading it is what keeps the two
+looking at the same code; `excludePaths` and `excludeDefaultPaths` are honoured
+with it. To point somewhere else instead — a non-standard install, or a build
+tree — pass paths in `initializationOptions`:
 
 ```json
 { "classLibraryPaths": ["/path/to/SCClassLibrary"] }

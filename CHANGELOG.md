@@ -5,6 +5,28 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
 ## Unreleased
 
+### Added
+
+- **The class library is found the way sclang finds it.** `sclang_conf.yaml`
+  is where sclang is told what to compile, and `includePaths` is how anyone
+  developing a quark points at their own checkout of it. The guessed locations
+  never saw those, so the server quietly indexed less than sclang did, and
+  nothing said so — goto-definition simply had no answer for a class that was
+  right there. The file is read now, along with `excludePaths` (by prefix, so
+  excluding a quark excludes what is under it) and `excludeDefaultPaths`.
+
+  Reading it is not a dependency on a running sclang, any more than reading a
+  `.sc` file is. An explicit `classLibraryPaths` still replaces the lot.
+
+  Measured on a machine with one quark checked out under `~/Documents`: 42 more
+  files, 6 more classes, 116 more methods. The resolution oracle, which had
+  needed those roots passed by hand to agree, now agrees on 751,601 of 751,639
+  pairs without being told anything.
+
+- A root that another root already contains is dropped, so a quark named in
+  `sclang_conf.yaml` *and* sitting in `downloaded-quarks` is walked once rather
+  than twice.
+
 ### Fixed
 
 - **A node with no children no longer claims the wrong range.** The tree

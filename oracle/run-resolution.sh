@@ -35,8 +35,9 @@ fi
 
 echo "==> comparing"
 cd "$root"
-# Extra arguments are class library roots. Pass the same ones sclang compiled
-# if it loads quarks from outside the usual places, or the comparison will
-# report methods missing that were simply never indexed.
+# Extra arguments are class library roots. Not usually needed: the default now
+# reads `sclang_conf.yaml`, so it sees the same directories sclang does,
+# including a quark checked out somewhere of your own. Pass them to compare
+# against a set this machine is not configured for.
 shift 2>/dev/null || true
 cargo run --release --quiet --example resolve_oracle -- "$here/oracle-resolution.tsv" "$@"
