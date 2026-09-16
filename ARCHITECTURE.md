@@ -46,6 +46,21 @@ already managing one for the user.
 The cost of dropping it is small and specific, and it is listed under
 *Deliberately not done* below rather than hidden.
 
+Which files, though, is a question the design has to answer and this document
+did not. Three sources, in order: an explicit `classLibraryPaths` in
+`initializationOptions` replaces everything else, which is what the tests use
+to stay hermetic; otherwise the platform's usual locations — the stock class
+library, `Extensions`, `downloaded-quarks` — together with whatever
+`sclang_conf.yaml` adds, minus whatever it excludes.
+
+Reading that file is not a dependency on a running sclang, any more than
+reading a `.sc` file is: it is a text file, it is absent on a fresh install,
+and nothing breaks when it is. But it is where sclang is told what to compile,
+so anyone developing a quark points at their own checkout of it there — and
+without reading it the server indexes less than sclang does and says nothing
+about the difference. Goto-definition simply has no answer for a class that is
+plainly there.
+
 Reading from disk is also the thing that can go stale. The index only hears
 about files the editor has open, so anything changing underneath it — a branch
 switch, a quark install, an edit in another program — would leave answers that
