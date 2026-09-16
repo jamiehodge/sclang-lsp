@@ -98,7 +98,13 @@ means the token model is faithful, not that the language is fully handled.
 
 ## Differential oracles
 
-Two, because they check different layers.
+Four, because they check different layers: tokens, symbols, dispatch, and the
+syntax a scratch buffer actually contains.
+
+Every number below was measured against SuperCollider **3.13.0** on macOS, with
+the stock class library plus this machine's Extensions and quarks. They move
+with what is installed — that is the point of asking the local sclang rather
+than committing a fixture — so reproduce them rather than trusting them.
 
 ### Lexer: against `sc_lexer`
 
@@ -115,8 +121,11 @@ cargo run --release --example lexer_oracle -- oracle/sc_lexer_dump <dir>...
 
 ```
 files compared : 680
+skipped        : 2
 agreed exactly : 680 / 680 (100.00%)
 ```
+
+The two skipped are the Latin-1 files that recur throughout this document.
 
 Token for token, including trivia. The two taxonomies are reconciled on one
 axis only: upstream splits whitespace by character class (`Space`/`NewLine`/
@@ -176,10 +185,12 @@ boot servers, open windows and throw.
 ```
 
 ```
+indexed 695 files: 1,806 classes, 15,389 methods
 pairs compared   : 751,639
 agreed exactly   : 751,601 / 751,639 (99.9949%)
 resolved nothing : 38
 wrong owner      : 0
+class not indexed: 2,108 (skipped)
 ```
 
 Every class, against every selector anywhere in its own superclass chain. **The
@@ -187,9 +198,13 @@ walk never picks the wrong implementation.** The 38 gaps are all
 `+ SequenceableCollection` in a file that is not valid UTF-8 — the same
 known gap as everywhere else, and nothing the resolution does.
 
-Pass the class library roots as extra arguments if sclang loads quarks from
-outside the usual places; otherwise the comparison reports methods missing that
-were simply never indexed.
+The roots are found the way sclang finds them, `sclang_conf.yaml` included, so
+a quark checked out somewhere of your own is covered without being named. That
+was not always true, and this oracle is what showed it: against the guessed
+locations alone it reported 90 methods missing, of which only 38 were the
+Latin-1 gap. The other 52 were in a quark sclang compiles and the server had
+never read. Extra arguments still override, for comparing against a set this
+machine is not configured for.
 
 **This oracle immediately earned itself.** The first run agreed on only 40% of
 pairs, all failures of the form "sclang says `Object`, we found no method".
@@ -229,12 +244,33 @@ boot servers, open windows and make noise.
 snippets compared         : 4,785
 lossless                  : 4,785 / 4,785  (all)
 sclang accepts, we do not : 0
+we accept, sclang does not: 1,481
 ```
 
 The asymmetry is the point. A snippet sclang accepts and this rejects is a bug
 here. The other direction is softer — this parser is deliberately error
 tolerant, and a fragment it makes sense of is not automatically wrong — but a
 large gap that way means the grammar has drifted permissive.
+
+Most of the 1,481 are not grammar at all, and the oracle cannot separate them
+by itself. Asking sclang for its first error on an evenly spread sample of 60:
+
+| | |
+|---|---|
+| 48 | `syntax error, … expecting end of file` |
+| 9 | `Variable 'x' not defined`, `Class not defined` |
+| 3 | another syntax error |
+
+The first group is the shape of the corpus rather than a disagreement about the
+language. `String:compile` parses its argument as one `cmdlinecode`, and a
+help-file `code::` block is usually several separate examples — so everything
+after the first is "unexpected, expecting end of file". A `.scd` file holding a
+stack of blocks evaluated one at a time is the ordinary case, and reading one is
+the thing this parser exists for.
+
+The second is semantic, which nothing purely syntactic can detect and nothing
+should try to. Only the last group is this parser being more tolerant than
+sclang, which is deliberate: the buffer in an editor is usually not yet valid.
 
 **It found three bugs in its first run.** Two adjacent top-level blocks read as
 a call; `var` and `arg` declarations rejected inside a top-level block; and
@@ -277,10 +313,12 @@ cargo run --release --example token_sweep -- \
 ```
 
 ```
-files swept       : 5,465
-tokens            : 546,358
-not valid UTF-8   : 2 (skipped)
+files swept       : 5,133
+tokens            : 488,099
 ```
+
+Its size moves with the corpus, which is generated from whatever help files are
+installed rather than committed.
 
 ### What it does not check
 
@@ -299,6 +337,10 @@ as though it were in the source.
 `DumpParseNode.cpp` has been in SuperCollider for years with no caller: no
 flag, no primitive, nothing. `oracle/expose-dumpparsenode.patch` adds an
 env-var hook so class-library compilation emits each file's parse tree.
+
+Unlike the four above, this one cannot run against an installed SuperCollider —
+it needs a patched build of its own, so its figures come from a separate run
+and are not refreshed alongside the rest.
 
 ```bash
 ./oracle/build-sclang-dump.sh          # clone, patch, build sclang only
