@@ -99,7 +99,9 @@ means the token model is faithful, not that the language is fully handled.
 ## Differential oracles
 
 Four, because they check different layers: tokens, symbols, dispatch, and the
-syntax a scratch buffer actually contains.
+syntax a scratch buffer actually contains. A fifth, against sclang's own parse
+trees, is further down under *Parse-tree dump* — it needs a patched build of
+SuperCollider rather than an installed one, which is why it sits apart.
 
 Every number below was measured against SuperCollider **3.13.0** on macOS, with
 the stock class library plus this machine's Extensions and quarks. They move
@@ -338,22 +340,37 @@ as though it were in the source.
 flag, no primitive, nothing. `oracle/expose-dumpparsenode.patch` adds an
 env-var hook so class-library compilation emits each file's parse tree.
 
-Unlike the four above, this one cannot run against an installed SuperCollider —
-it needs a patched build of its own, so its figures come from a separate run
-and are not refreshed alongside the rest.
+Unlike the four above, this one cannot run against an installed SuperCollider:
+it needs a patched build, and it therefore compares against that build's own
+`SCClassLibrary` rather than the installed 3.13 one. The numbers below are from
+a run of it, not from an older record.
 
 ```bash
 ./oracle/build-sclang-dump.sh          # clone, patch, build sclang only
-SCLANG_DUMP_PARSE=1 <build>/lang/sclang -a -l conf.yaml -i none quit.scd
+```
+
+`conf.yaml` points it at the class library that came with the build, so the
+dump covers a known set rather than whatever is installed, and `quit.scd` is
+one line — `0.exit;`. The compile is the whole point; the script is only there
+to end it.
+
+```yaml
+includePaths:
+    - <clone>/SCClassLibrary
+excludePaths: []
+excludeDefaultPaths: true
 ```
 
 ```bash
+SCLANG_DUMP_PARSE=1 <build>/lang/sclang -a -l conf.yaml -i none quit.scd > dump.log
 cargo run --release --example tree_oracle -- dump.log
 ```
 
 ```
+files             : 330
 methods compared  : 9,731
 selectors compared: 53,684
+not found in ours : 0
 selector sequences identical: 9,731 / 9,731 (100.00%)
 ```
 
