@@ -99,17 +99,22 @@ fn class_hover(index: &SymbolIndex, name: &str) -> Option<String> {
 }
 
 fn selector_hover(index: &SymbolIndex, name: &str, receiver: &Receiver) -> Option<String> {
-    let methods = resolve_selector(index, name, receiver);
+    let resolved = resolve_selector(index, name, receiver);
+
+    // Dispatch was narrowed to one definition, so describe that one. Keyed on
+    // the resolution rather than on the receiver's shape: `"a".reverse` and
+    // `this.play` resolve as tightly as `SinOsc.ar` does.
+    if let Some(method) = resolved.single() {
+        return Some(method_hover(method));
+    }
+
+    let methods = resolved.methods;
     if methods.is_empty() {
         return None;
     }
 
-    if let Receiver::Class(_) = receiver {
-        return Some(method_hover(methods[0]));
-    }
-
-    // No receiver type, so describe the candidates rather than pretending to
-    // have picked one.
+    // Nothing narrowed it, so describe the candidates rather than pretending
+    // to have picked one.
     let mut out = String::new();
     let shown = methods.len().min(MAX_IMPLEMENTORS);
     for m in methods.iter().take(shown) {

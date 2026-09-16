@@ -296,7 +296,11 @@ fn name_token(
 
 /// A leading `*` is the class-method marker only when a name follows it;
 /// `* { ... }` is an instance method named `*`.
-fn is_class_method(node: &SyntaxNode) -> bool {
+///
+/// Public because the side a method is on decides what `this` means in its
+/// body, and that question is asked from outside this crate. One rule, one
+/// place: the `* { }` case is subtle enough that a second copy would drift.
+pub fn is_class_method(node: &SyntaxNode) -> bool {
     let toks: Vec<_> = node
         .child_tokens()
         .filter(|t| !t.kind.is_trivia())

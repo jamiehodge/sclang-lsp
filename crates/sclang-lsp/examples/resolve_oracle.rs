@@ -12,7 +12,7 @@
 //!
 //!     cargo run --release --example resolve_oracle -- <dump.tsv> [dir...]
 
-use sclang_lsp::analysis::{resolve_selector, Receiver};
+use sclang_lsp::analysis::{resolve_selector, Certainty, Receiver};
 use sclang_lsp::workspace::{build_index, default_roots};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -72,9 +72,19 @@ fn main() {
         }
 
         compared += 1;
-        let resolved = resolve_selector(&index, selector, &Receiver::Instance(class.to_string()));
+        let resolved = resolve_selector(
+            &index,
+            selector,
+            &Receiver::Instance {
+                class: class.to_string(),
+                certainty: Certainty::Certain,
+            },
+        );
 
-        match resolved.first() {
+        // `single` and not `methods.first()`: the oracle asks where dispatch
+        // lands, so falling back to the implementor list must count as having
+        // found nothing rather than as an answer.
+        match resolved.single() {
             Some(m) if m.owner == expected => agreed += 1,
             Some(m) => wrong_owner.push((
                 class.to_string(),

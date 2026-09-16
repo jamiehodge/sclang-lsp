@@ -7,6 +7,25 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
 ### Added
 
+- **`this` and `super` resolve.** A send to `this` is a quarter of the sends in
+  the stock class library — 8,419 of 37,707 — and the class it names is written
+  at the top of the node the cursor is already inside. Reading it off the tree
+  is not inference; it is the same act as reading `String` off a string
+  literal. Goto, hover, completion and signature help all narrow accordingly:
+  `this.sound` inside `Dog` goes to `Dog`'s, not to a list of every class with
+  a `sound`. In a class method `this` is the class object, so `^this.multiNew`
+  is a class-side send; `super` starts one class up on the same side.
+
+  Narrowing never turns an honest list into nothing. 1.6% of `this.` sends in
+  the class library name a selector the chain does not define — a superclass
+  calling a method only its subclasses implement, like
+  `SequenceableCollection`'s `choose` sending `this.at` — so a chain miss falls
+  back to every implementor, which is exactly the answer it gave before.
+
+  `super` inside a `+ Foo { }` extension stays unknown: an extension header
+  writes down no superclass, and guessing beats saying nothing at nobody's
+  expense. Three sends in the stock library.
+
 - **Inherited class slots.** `Pgate` reads `pattern`, an instance variable
   declared two classes above it on `FilterPattern` and in another file, so the
   lexical walk over one buffer never saw it — no hover, no goto, no completion,
@@ -25,6 +44,42 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
   identifiers spread across every subclass in the workspace, and the occurrence
   index records only class names and selectors; an answer covering the open
   buffer alone would read as complete and would not be.
+
+- **Certainty, so an inlay hint can say more without claiming more.** The class
+  of a receiver was already known in two quite different senses — the grammar
+  settling a literal's class, and the convention that `*new` returns an
+  instance of its own class — and the two were collapsed into one answer, so
+  the features that render into the buffer had to refuse both. They are now
+  kept apart. `"abc".copyRange(0, 2)` gets its parameter names labelled;
+  `Thing.new.at(1, 2)` still does not, because a class is free to return
+  something else from `*new` and a few do.
+
+- **A variable carries the class it was initialised with.** `var pet = Cat.new`
+  makes `pet.sound` resolve to `Cat`'s, on the same convention that already
+  covered `Cat.new.sound` written inline. Nothing follows an assignment, and
+  nothing chains through a second variable — that would be inference proper.
+
+  Argument defaults are deliberately excluded. `|pet = Cat.new|` says what
+  happens when the parameter is *not* passed; every caller remains free to pass
+  anything, so reading it as the class of `pet` would be a claim about them.
+
+- **Completion after a `.` is ranked by distance up the chain.** Narrowing the
+  list was not enough to make it *look* narrowed: `Pbind` declares four
+  instance methods and inherits 437, so a correctly scoped list of 441 was hard
+  to tell from the unscoped 6,178. The receiver's own methods now sort first,
+  then its superclass's, and so on — `SinOsc.` opens on `ar` and `kr` rather
+  than on whatever `Object` has beginning with A.
+
+  This only decides the order when nothing has been typed yet, which is exactly
+  when there is no better signal. Once there is a prefix the client's own match
+  scoring leads. An unknown receiver has no chain to rank against and is left
+  alone.
+
+### Fixed
+
+- A send to a class object now falls back to `Class`'s instance side before the
+  class's own, so `this.allSubclasses` and `this.name` inside a `*method`
+  resolve to where they actually live.
 
 ## [0.10.0] — 2026-09-15
 

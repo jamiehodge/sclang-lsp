@@ -1380,7 +1380,7 @@ fn a_block_after_a_class_name_depends_on_the_file() {
 }
 
 // ---------------------------------------------------------------------------
-// Inherited class slots
+// `this` and `super`
 // ---------------------------------------------------------------------------
 
 /// The line and column of `needle` in `text`, so a test never hand-counts a
@@ -1397,6 +1397,109 @@ fn dog(h: &mut Harness, body: &str) -> (Url, String) {
     let text = format!("Dog : Animal {{\n\t{body}\n}}\n");
     (h.open("Dog.sc", &text), text)
 }
+
+#[test]
+fn this_resolves_to_the_class_the_send_is_written_in() {
+    let mut h = Harness::start("this-goto", &animal_library());
+    // Animal, Cat and Dog all define `sound`. `this` says which one this is.
+    let (uri, text) = dog(&mut h, "sound { ^1 }\n\tbark { ^this.sound }");
+    let (line, column) = at(&text, "sound }");
+
+    let response: GotoDefinitionResponse =
+        h.request_at("textDocument/definition", &uri, line, column);
+    let GotoDefinitionResponse::Scalar(location) = response else {
+        panic!("expected exactly one definition, got {response:?}");
+    };
+    assert!(
+        location.uri.path().ends_with("Dog.sc"),
+        "{:?}",
+        location.uri
+    );
+}
+
+#[test]
+fn this_walks_up_to_the_superclass_when_the_class_does_not_define_it() {
+    let mut h = Harness::start("this-inherited", &animal_library());
+    let (uri, text) = dog(&mut h, "bark { ^this.sound }");
+    let (line, column) = at(&text, "sound }");
+
+    let response: GotoDefinitionResponse =
+        h.request_at("textDocument/definition", &uri, line, column);
+    let GotoDefinitionResponse::Scalar(location) = response else {
+        panic!("expected exactly one definition, got {response:?}");
+    };
+    assert!(
+        location.uri.path().ends_with("Animal.sc"),
+        "{:?}",
+        location.uri
+    );
+}
+
+#[test]
+fn super_starts_one_class_up() {
+    let mut h = Harness::start("super-goto", &animal_library());
+    // Dog overrides `sound`, so `super.sound` is Animal's and not its own.
+    let (uri, text) = dog(&mut h, "sound { ^super.sound }");
+    let (line, column) = at(&text, "sound }");
+
+    let response: GotoDefinitionResponse =
+        h.request_at("textDocument/definition", &uri, line, column);
+    let GotoDefinitionResponse::Scalar(location) = response else {
+        panic!("expected exactly one definition, got {response:?}");
+    };
+    assert!(
+        location.uri.path().ends_with("Animal.sc"),
+        "{:?}",
+        location.uri
+    );
+}
+
+#[test]
+fn a_selector_the_chain_misses_still_lists_every_implementor() {
+    let mut h = Harness::start("this-fallback", &animal_library());
+    // `Plant` inherits nothing that defines `sound`, but three classes do —
+    // a superclass calling a method only its subclasses define is the ordinary
+    // shape of a template method, and narrowing must not answer "nothing".
+    let text = "Plant : Object {\n\tgrow { ^this.sound }\n}\n";
+    let uri = h.open("Plant.sc", text);
+    let (line, column) = at(text, "sound }");
+
+    let response: GotoDefinitionResponse =
+        h.request_at("textDocument/definition", &uri, line, column);
+    let locations = match response {
+        GotoDefinitionResponse::Array(l) => l,
+        GotoDefinitionResponse::Scalar(l) => vec![l],
+        other => panic!("expected definitions, got {other:?}"),
+    };
+    assert!(
+        !locations.is_empty(),
+        "a chain miss must fall back to implementors rather than to nothing"
+    );
+}
+
+#[test]
+fn completion_after_this_offers_the_chain_rather_than_the_world() {
+    let mut h = Harness::start("this-complete", &animal_library());
+    let (uri, text) = dog(&mut h, "bark { ^this. }");
+    let (line, dot) = at(&text, ". }");
+
+    let response: CompletionResponse = h.request_at("textDocument/completion", &uri, line, dot);
+    let items = match response {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    let labels: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(labels.contains(&"sound"), "{labels:?}");
+    assert!(labels.contains(&"speak"), "{labels:?}");
+    // Inherited from Object, two classes up.
+    assert!(labels.contains(&"postln"), "{labels:?}");
+    // `Cat` is a sibling, so nothing of its own is reachable through `this`.
+    assert!(!labels.contains(&"meow"), "{labels:?}");
+}
+
+// ---------------------------------------------------------------------------
+// Inherited class slots
+// ---------------------------------------------------------------------------
 
 #[test]
 fn hover_names_the_class_an_inherited_slot_comes_from() {
@@ -1467,4 +1570,158 @@ fn a_local_shadows_an_inherited_slot() {
     };
     assert!(markup.value.contains("argument"), "{}", markup.value);
     assert!(!markup.value.contains("Animal"), "{}", markup.value);
+}
+
+// ---------------------------------------------------------------------------
+// Certainty: what may be rendered as though it were in the source
+// ---------------------------------------------------------------------------
+
+fn hints(h: &mut Harness, uri: &Url) -> Vec<InlayHint> {
+    h.request(
+        "textDocument/inlayHint",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "range": { "start": { "line": 0, "character": 0 },
+                       "end": { "line": 2, "character": 0 } },
+        }),
+    )
+}
+
+#[test]
+fn inlay_hints_label_a_literal_receivers_arguments() {
+    let mut h = Harness::start("inlay-literal", &mini_library());
+    // A string literal's class is a fact of the grammar, so the parameter name
+    // may be stated as one. Before this, only a bare class name qualified.
+    h.open(
+        "String.sc",
+        "String : Object {\n\tcopyRange { |start, end| ^this }\n}\n",
+    );
+    let uri = h.open("Use.scd", "\"abc\".copyRange(0, 2)\n");
+
+    let labels: Vec<_> = hints(&mut h, &uri)
+        .into_iter()
+        .map(|hint| match hint.label {
+            InlayHintLabel::String(s) => s,
+            other => panic!("unexpected label {other:?}"),
+        })
+        .collect();
+    assert_eq!(labels, vec!["start:", "end:"], "{labels:?}");
+}
+
+#[test]
+fn inlay_hints_stay_silent_for_a_conventional_receiver() {
+    let mut h = Harness::start("inlay-conventional", &mini_library());
+    // `Foo.new` returning a Foo is a convention a class is free to break, and
+    // a hint renders as though it were written in the source.
+    h.open(
+        "Thing.sc",
+        "Thing : Object {\n\tat { |index, default| ^index }\n}\n",
+    );
+    let uri = h.open("Use.scd", "Thing.new.at(1, 2)\n");
+
+    assert!(hints(&mut h, &uri).is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// A variable carries the class it was initialised with
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_variable_carries_the_class_it_was_initialised_with() {
+    let mut h = Harness::start("var-init", &animal_library());
+    let text = "(\nvar pet = Cat.new;\npet.sound;\n)\n";
+    let uri = h.open("Use.scd", text);
+    let (line, column) = at(text, "sound;");
+
+    let response: GotoDefinitionResponse =
+        h.request_at("textDocument/definition", &uri, line, column);
+    let GotoDefinitionResponse::Scalar(location) = response else {
+        panic!("expected exactly one definition, got {response:?}");
+    };
+    assert!(
+        location.uri.path().ends_with("Cat.sc"),
+        "{:?}",
+        location.uri
+    );
+}
+
+#[test]
+fn an_argument_default_does_not_give_the_argument_a_class() {
+    let mut h = Harness::start("arg-default", &animal_library());
+    // Every caller is free to pass anything, so the default says nothing about
+    // what `pet` is — all three implementors stay on the list.
+    let text = "Plant : Object {\n\tfeed { |pet = Cat.new| ^pet.sound }\n}\n";
+    let uri = h.open("Plant.sc", text);
+    let (line, column) = at(text, "sound }");
+
+    let response: GotoDefinitionResponse =
+        h.request_at("textDocument/definition", &uri, line, column);
+    let GotoDefinitionResponse::Array(locations) = response else {
+        panic!("expected every implementor, got {response:?}");
+    };
+    let files: Vec<_> = locations
+        .iter()
+        .map(|l| l.uri.path().rsplit('/').next().unwrap().to_string())
+        .collect();
+    assert!(files.contains(&"Animal.sc".to_string()), "{files:?}");
+    assert!(files.contains(&"Cat.sc".to_string()), "{files:?}");
+}
+
+// ---------------------------------------------------------------------------
+// Ranking: a narrowed list has to look narrowed
+// ---------------------------------------------------------------------------
+
+/// Completion labels in the order a client with nothing typed would show them.
+fn ranked(h: &mut Harness, uri: &Url, line: u32, column: u32) -> Vec<String> {
+    let response: CompletionResponse = h.request_at("textDocument/completion", uri, line, column);
+    let mut items = match response {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    items.sort_by(|a, b| {
+        let key = |i: &CompletionItem| i.sort_text.clone().unwrap_or_else(|| i.label.clone());
+        key(a).cmp(&key(b))
+    });
+    items.into_iter().map(|i| i.label).collect()
+}
+
+#[test]
+fn a_class_side_list_leads_with_the_classs_own_methods() {
+    let mut h = Harness::start("rank-class", &mini_library());
+    let text = "SinOsc.\n";
+    let uri = h.open("Use.scd", text);
+
+    let labels = ranked(&mut h, &uri, 0, 7);
+    // `ar` and `kr` are SinOsc's; `multiNew` is UGen's, one class further up.
+    let position = |name: &str| labels.iter().position(|l| l == name).expect(name);
+    assert!(position("ar") < position("multiNew"), "{labels:?}");
+    assert!(position("kr") < position("multiNew"), "{labels:?}");
+}
+
+#[test]
+fn an_instance_list_ranks_by_distance_up_the_chain() {
+    let mut h = Harness::start("rank-instance", &animal_library());
+    let (uri, text) = dog(&mut h, "bark { ^1 }\n\tgo { ^this. }");
+    let (line, dot) = at(&text, ". }");
+
+    let labels = ranked(&mut h, &uri, line, dot);
+    let position = |name: &str| labels.iter().position(|l| l == name).expect(name);
+    // Dog's own, then Animal's, then Object's.
+    assert!(position("bark") < position("speak"), "{labels:?}");
+    assert!(position("speak") < position("postln"), "{labels:?}");
+}
+
+#[test]
+fn an_unknown_receiver_is_not_ranked_by_a_chain_it_does_not_have() {
+    let mut h = Harness::start("rank-unknown", &animal_library());
+    let uri = h.open("Use.scd", "x.\n");
+
+    let response: CompletionResponse = h.request_at("textDocument/completion", &uri, 0, 2);
+    let items = match response {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(!items.is_empty());
+    // Nothing to rank against, so the client's own ordering stands.
+    assert!(items.iter().all(|i| i.sort_text.is_none()), "{items:?}");
 }

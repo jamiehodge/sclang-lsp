@@ -5,7 +5,9 @@
 //! not, this returns every class that defines the selector rather than
 //! guessing — see "Deliberately not done" in ARCHITECTURE.md.
 
-use crate::analysis::{call_at, enclosing_class_at, resolve_selector, token_at, Bias, Receiver};
+use crate::analysis::{
+    call_at, enclosing_class_at, resolve_selector, token_at, Bias, Receiver, ReceiverContext,
+};
 use crate::documents::Document;
 use crate::scope::{class_slots, locals_at, Local, LocalKind, Slot};
 use sclang_index::{Method, MethodKind, SymbolIndex};
@@ -57,12 +59,14 @@ pub fn context_at(root: &SyntaxNode, source: &str, offset: u32) -> Context {
     let prefix = |token: &sclang_syntax::Token| {
         source[token.start as usize..offset.min(token.end) as usize].to_string()
     };
+    // What a receiver needs beyond its own node, from the path already in hand.
+    let ctx = ReceiverContext::from_path(root, &path.ancestors, source);
 
     match token.kind {
         SyntaxKind::Dot => match path.parent() {
             Some(parent) if parent.kind == SyntaxKind::MethodCall => Context::Selector {
                 prefix: String::new(),
-                receiver: receiver_before(parent, token.start, source),
+                receiver: receiver_before(parent, token.start, source, &ctx),
             },
             _ => Context::Nothing,
         },
@@ -81,7 +85,7 @@ pub fn context_at(root: &SyntaxNode, source: &str, offset: u32) -> Context {
             match (dot, path.parent()) {
                 (Some(dot), Some(parent)) => Context::Selector {
                     prefix: prefix(&token),
-                    receiver: receiver_before(parent, dot.start, source),
+                    receiver: receiver_before(parent, dot.start, source, &ctx),
                 },
                 _ => Context::Bare {
                     prefix: prefix(&token),
@@ -93,9 +97,14 @@ pub fn context_at(root: &SyntaxNode, source: &str, offset: u32) -> Context {
 }
 
 /// The receiver node immediately left of an offset within a call.
-fn receiver_before(call: &SyntaxNode, before: u32, source: &str) -> Receiver {
+fn receiver_before(
+    call: &SyntaxNode,
+    before: u32,
+    source: &str,
+    ctx: &ReceiverContext<'_>,
+) -> Receiver {
     let node = call.children.iter().rev().find(|c| c.range().1 <= before);
-    crate::analysis::receiver_from(node, source)
+    crate::analysis::receiver_from(node, source, ctx)
 }
 
 pub fn completion(doc: &Document, index: &SymbolIndex, offset: u32) -> CompletionResponse {
@@ -117,24 +126,34 @@ pub fn completion(doc: &Document, index: &SymbolIndex, offset: u32) -> Completio
             Receiver::Class(name) => {
                 // A class object answers its own class-side methods, and also
                 // the instance methods of `Class` and `Object` above it —
-                // which is why `SinOsc.dumpInterface` works.
-                let mut methods = index.methods_visible_on(&name, MethodKind::Class);
-                methods.extend(index.methods_visible_on("Class", MethodKind::Instance));
-                for m in methods {
-                    if !m.name.starts_with(&prefix) {
-                        continue;
+                // which is why `SinOsc.dumpInterface` works. The borrowed
+                // instance methods rank below every class-side one, however
+                // near the chain puts them.
+                let own = index.methods_visible_on(&name, MethodKind::Class);
+                let chain = chain_of(index, &name);
+                let borrowed = index.methods_visible_on("Class", MethodKind::Instance);
+                let groups = [(own, &chain[..], 0), (borrowed, &[][..], chain.len())];
+
+                'groups: for (methods, chain, base) in groups {
+                    for m in methods {
+                        if !m.name.starts_with(&prefix) {
+                            continue;
+                        }
+                        if items.len() >= LIMIT {
+                            truncated = true;
+                            break 'groups;
+                        }
+                        let mut item = method_item(m, Some(&name));
+                        item.sort_text = Some(rank(base + depth(chain, &m.owner), &m.name));
+                        items.push(item);
                     }
-                    if items.len() >= LIMIT {
-                        truncated = true;
-                        break;
-                    }
-                    items.push(method_item(m, Some(&name)));
                 }
             }
             // An instance answers instance-side methods, its superclasses'
             // included. This is the difference between `Pbind(...).p` offering
             // Pbind's own `play`, and offering every `play` in the image.
-            Receiver::Instance(name) => {
+            Receiver::Instance { class: name, .. } => {
+                let chain = chain_of(index, &name);
                 for m in index.methods_visible_on(&name, MethodKind::Instance) {
                     if !m.name.starts_with(&prefix) {
                         continue;
@@ -143,7 +162,9 @@ pub fn completion(doc: &Document, index: &SymbolIndex, offset: u32) -> Completio
                         truncated = true;
                         break;
                     }
-                    items.push(method_item(m, Some(&name)));
+                    let mut item = method_item(m, Some(&name));
+                    item.sort_text = Some(rank(depth(&chain, &m.owner), &m.name));
+                    items.push(item);
                 }
             }
             Receiver::Unknown => {
@@ -230,9 +251,12 @@ fn push_selectors_by_name(
 
 /// Offer `name:` for each parameter of the call the cursor is inside.
 ///
-/// Only when the receiver resolves exactly. With an unknown receiver the
-/// selector may be defined on dozens of classes with different parameter
-/// names, and inventing one set would be a guess dressed as knowledge.
+/// Only when dispatch resolves to one method *and* the receiver's class is a
+/// fact of the grammar. With an unknown receiver the selector may be defined
+/// on dozens of classes with different parameter names, and inventing one set
+/// would be a guess dressed as knowledge; with a conventional receiver like
+/// `Foo.new` the class is very probably right, which is not the same as right,
+/// and a parameter name completes into the buffer as though it were.
 fn push_keyword_args(
     doc: &Document,
     index: &SymbolIndex,
@@ -243,11 +267,10 @@ fn push_keyword_args(
     let Some(call) = call_at(&doc.parse().root, &doc.text, offset) else {
         return;
     };
-    if !matches!(call.receiver, Receiver::Class(_)) {
+    if !call.receiver.is_certain() {
         return;
     }
-    let methods = resolve_selector(index, &call.selector, &call.receiver);
-    let Some(method) = methods.first() else {
+    let Some(method) = resolve_selector(index, &call.selector, &call.receiver).single() else {
         return;
     };
 
@@ -304,6 +327,35 @@ fn local_item(local: &Local) -> CompletionItem {
         detail: Some(detail),
         ..Default::default()
     }
+}
+
+/// A receiver's superclass chain, nearest first, by name.
+fn chain_of(index: &SymbolIndex, class: &str) -> Vec<String> {
+    index
+        .superclass_chain(class)
+        .into_iter()
+        .map(|c| c.name.clone())
+        .collect()
+}
+
+/// How far up the chain a method was found. Off the chain sorts last.
+fn depth(chain: &[String], owner: &str) -> usize {
+    chain.iter().position(|c| c == owner).unwrap_or(chain.len())
+}
+
+/// A sort key that puts the receiver's own methods above the ones it inherits.
+///
+/// `methods_visible_on` already walks the chain nearest-first, but a client
+/// sorts by `sortText` and throws that order away. Without this, the four
+/// methods `Pbind` declares are alphabetised in among the 272 it inherits from
+/// `Object`, and a correctly narrowed list of 441 is indistinguishable from an
+/// unnarrowed one at a glance.
+///
+/// Only decides the order with nothing typed yet, which is exactly when there
+/// is no better signal: once there is a prefix the client's own match scoring
+/// leads, and `play` beating `pause` on quality is what you want.
+fn rank(depth: usize, name: &str) -> String {
+    format!("{:02}{name}", depth.min(99))
 }
 
 fn method_item(m: &Method, on_class: Option<&str>) -> CompletionItem {

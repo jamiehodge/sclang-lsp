@@ -35,6 +35,7 @@ pub fn goto_definition(
             .collect(),
 
         Point::Selector { name, receiver } => resolve_selector(index, &name, &receiver)
+            .methods
             .into_iter()
             .take(MAX_IMPLEMENTORS)
             .filter_map(|m| resolver.resolve(&m.location))

@@ -24,7 +24,7 @@ pub fn signature_help(doc: &Document, index: &SymbolIndex, offset: u32) -> Optio
     let source = &doc.text;
     let call = call_at(root, source, offset)?;
 
-    let methods = resolve_selector(index, &call.selector, &call.receiver);
+    let methods = resolve_selector(index, &call.selector, &call.receiver).methods;
     if methods.is_empty() {
         return None;
     }

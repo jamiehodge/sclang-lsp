@@ -25,7 +25,7 @@
 mod build;
 mod symbols;
 
-pub use build::{symbols_of, FileSymbols};
+pub use build::{is_class_method, symbols_of, FileSymbols};
 pub use symbols::*;
 
 use std::collections::{BTreeMap, BTreeSet};

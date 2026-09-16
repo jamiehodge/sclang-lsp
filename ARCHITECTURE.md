@@ -71,9 +71,10 @@ exist.
 1. **Parser errors** — live, per keystroke. Produced by `sclang-syntax`;
    nothing else needed.
 2. **Conservative semantic lints** over the index — unknown class, method not
-   found, arity mismatch. Keep these narrow: fire only when the receiver is a
-   literal class name. SuperCollider is dynamically typed and false positives
-   here are worse than silence.
+   found, arity mismatch. Keep these narrow: fire only where the receiver's
+   class is a fact of the grammar, which `Receiver::is_certain` is exactly the
+   test for. SuperCollider is dynamically typed and false positives here are
+   worse than silence.
 3. **Class-library compile errors** — not from this server at all. sclang
    prints them while compiling, before any image exists, which is why nothing
    that talks to a *running* sclang can report them: there is no sclang running
@@ -258,11 +259,19 @@ would be noise that the diagnostics already deliver properly.
 - **No `~envir` completion.** Environment variables live in a running image and
   nothing static can enumerate them. This is the one real capability given up
   by dropping the live tier, and it is worth the exchange.
-- **No type inference.** Without types, `implementors()` — every class defining
-  a selector — is the honest answer for completion after a `.`. Inlay hints and
-  keyword-argument completion go further and stay silent unless the receiver is
-  a literal class name, because both render as though they were in the source
-  and a guess there would read as a fact.
+- **No type inference.** Nothing follows a value through an assignment, out of
+  a method, or across a call. `implementors()` — every class defining a
+  selector — remains the honest answer wherever the receiver's class is not
+  written down, and narrowing falls back to it rather than to nothing, so an
+  answer is never lost by trying.
+
+  What *is* read is what the grammar already settled, which is a different
+  thing from inferring: a literal's class, `this` and `super` (the class is at
+  the top of the enclosing node), and the class a variable was initialised
+  with. `analysis::Certainty` keeps the grammar's facts apart from the
+  convention that `*new` returns an instance of its own class, because inlay
+  hints and keyword-argument completion render as though they were in the
+  source and may only state the former.
 - **No renaming methods.** Dispatch is dynamic, so nothing distinguishes one
   class's `play` from another's. Rename runs only where the occurrence set is
   provably complete: function locals and class names.

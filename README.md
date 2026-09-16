@@ -19,15 +19,15 @@ installed at all. It never starts sclang and never talks to one.
 | | |
 |---|---|
 | **Diagnostics** | Syntax errors, per keystroke |
-| **Completion** | Parameter names inside a call, then names in scope, then class names. Class-side methods after `Foo.`, inherited ones included |
+| **Completion** | Parameter names inside a call, then names in scope, then class names. Class-side methods after `Foo.`, inherited ones included; instance methods after `this.`, a literal or a variable whose class is known |
 | **Signature help** | The call being typed, with the current parameter marked. `name:` selects its own parameter rather than its position |
 | **Hover** | Signature, superclass chain, and the comment above the definition. For a local, what kind of binding it is and its default; for a slot a class inherits, which class it comes from |
-| **Goto-definition** | Exact for a class, a class receiver, a local or an inherited class slot; every implementor otherwise |
+| **Goto-definition** | Exact for a class, a local, an inherited class slot, and a receiver whose class is known — a class name, `this`, `super`, a literal, a variable initialised with a constructor; every implementor otherwise |
 | **Goto-implementation** | Every class defining a selector; on a class name, its subclasses |
 | **Find references** | Exact for a local or a class name; textual for a selector, since dispatch is dynamic |
 | **Document highlight** | The other places a name is written in this file, with the declaration marked |
 | **Rename** | Function locals and class names — everything whose uses can be enumerated completely |
-| **Inlay hints** | The parameter each positional argument fills |
+| **Inlay hints** | The parameter each positional argument fills, where the receiver's class is a fact rather than a convention |
 | **Semantic tokens** | Colour from the parse tree: a selector is a method, a name declared as `arg` stays a parameter wherever it appears, and a slot inherited from a superclass is a property. `full`, `range` and `full/delta` |
 | **Symbols** | Classes with their methods nested, and across the workspace |
 | **Folding** | Regions, class and method bodies, collections and block comments — including the `( … )` idiom indentation folding cannot see |
@@ -208,11 +208,17 @@ structure could not be read is how a formatter eats your work.
 
 ## What it does not do
 
-**No type inference.** Without types, `x.foo` offers every class defining
-`foo`, which is the honest answer. Inlay hints and keyword-argument completion
-go further and stay silent unless the receiver is a literal class name: both
-render as though they were in the source, and a guess there would read as a
-fact.
+**No type inference.** Nothing follows a value through an assignment, out of a
+method, or across a call. What is read instead is what the grammar has already
+settled: a literal's class, `this` and `super`, and the class a variable was
+initialised with. Past that — `x.foo` where `x` came from somewhere the tree
+does not say — every class defining `foo` is the honest answer, and narrowing
+never replaces that list with nothing.
+
+Inlay hints and keyword-argument completion go one step further again, and stay
+silent unless the class is a fact rather than a convention. Both render as
+though they were written in the source, and `Foo.new` returning a `Foo` is a
+convention a class is free to break.
 
 **No references for an inherited class slot.** Hover and goto will tell you
 where `pattern` is declared; find-references will not enumerate who reads it.
