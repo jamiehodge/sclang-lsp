@@ -532,9 +532,14 @@ pub(crate) fn expr(p: &mut Parser) -> Option<CompletedMarker> {
             }
             // `key: value` in argument position is handled by arg_list; at
             // expression level it is a binary selector call.
+            //
+            // `expr binop2 adverb expr`, and `binop2 : binop | keybinop` — so
+            // the adverb is as available here as after any other operator.
+            // `a foo: .x b` compiles.
             KeywordBinop => {
                 let m = lhs.precede(p);
                 p.bump();
+                adverb(p);
                 if unary_expr(p).is_none() {
                     p.error("expected an expression after selector");
                 }
@@ -678,7 +683,17 @@ fn postfix_expr(p: &mut Parser) -> Option<CompletedMarker> {
             LBracket => {
                 let m = expr.precede(p);
                 p.bump();
-                index_args(p);
+                // `msgsend : classname '[' arrayelems ']'` is a typed
+                // collection literal, and `arrayelems` is not `arglist1`: it
+                // takes `key: value` pairs and has no `..` form. So
+                // `Set[0: 1]` is valid where `a[0: 1]` is not, and `Set[1..3]`
+                // is not where `a[1..3]` is — exactly the opposite pair, and
+                // sclang agrees on all four.
+                if expr.kind() == ClassRef {
+                    array_elems(p);
+                } else {
+                    index_args(p);
+                }
                 if !p.eat(RBracket) {
                     p.error("expected ']'");
                     p.recover_until(&[RBracket, Semicolon, RBrace]);
@@ -1058,11 +1073,17 @@ fn primary_expr(p: &mut Parser) -> Option<CompletedMarker> {
         LParen => paren_or_series(p),
         LBracket => collection(p),
         // `#[1, 2]` literal array, or `#a, b = c` destructuring.
+        //
+        // `listlit : '#' '[' literallistc ']' | '#' classname '[' … ']'`, so
+        // the array may name the class to build: `#Set[1, 2]`.
         Hash => {
-            if p.nth(1) == LBracket {
+            let literal_list =
+                p.nth(1) == LBracket || (p.nth(1) == ClassName && p.nth(2) == LBracket);
+            if literal_list {
                 let m = p.start();
-                p.bump();
-                p.bump();
+                p.bump(); // '#'
+                p.eat(ClassName);
+                p.bump(); // '['
                 arg_list_items(p, RBracket);
                 p.expect(RBracket);
                 m.complete(p, LiteralList)

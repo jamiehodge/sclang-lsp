@@ -339,12 +339,30 @@ pub fn instance_class(node: &SyntaxNode, source: &str) -> Option<(String, Certai
         SyntaxKind::FunctionBlock => Some(("Function".to_string(), Certain)),
         SyntaxKind::EventLiteral => Some(("Event".to_string(), Certain)),
 
-        // `Set[...]` names its own class; a bare `[...]` is an Array.
-        SyntaxKind::Collection => Some((
+        // A bare `[…]`.
+        SyntaxKind::Collection => Some(("Array".to_string(), Certain)),
+
+        // `Set[1, 2]` — a typed collection literal, which names its own class.
+        //
+        // It arrives as an `IndexExpr`, not a `Collection`: the parser reads
+        // `msgsend : classname '[' arrayelems ']'` through the postfix chain,
+        // as an index on a class reference. The `Collection` arm above used to
+        // look for a class name of its own and could never find one, so
+        // `Set[1, 2].includes(x)` had an unknown receiver and offered every
+        // `includes` in the image.
+        SyntaxKind::IndexExpr => {
+            let head = node.child_nodes().next()?;
+            (head.kind == SyntaxKind::ClassRef)
+                .then(|| head.token_of(SyntaxKind::ClassName))
+                .flatten()
+                .map(|name| (name.text(source).to_string(), Certain))
+        }
+
+        // `#[1, 2]`, and `#Set[1, 2]` which names the class to build.
+        SyntaxKind::LiteralList => Some((
             class_named(node, source).unwrap_or_else(|| "Array".to_string()),
             Certain,
         )),
-        SyntaxKind::LiteralList => Some(("Array".to_string(), Certain)),
 
         SyntaxKind::Literal => {
             // `floatp : floatr pie | integer pie | pie` — a `pi` suffix makes
@@ -944,6 +962,16 @@ mod receiver_tests {
         assert_eq!(receiver("\\sym.asString"), certain("Symbol"));
         assert_eq!(receiver("$c.ascii"), certain("Char"));
         assert_eq!(receiver("(a: 1).keys"), certain("Event"));
+        // A typed collection literal names its own class. It reaches the
+        // analysis as an index on a class reference rather than as a
+        // collection, which is why this used to say nothing at all.
+        assert_eq!(receiver("Set[1, 2].includes(3)"), certain("Set"));
+        assert_eq!(
+            receiver("IdentityDictionary[].at(1)"),
+            certain("IdentityDictionary")
+        );
+        assert_eq!(receiver("#Set[1, 2].size"), certain("Set"));
+        assert_eq!(receiver("#[1, 2].size"), certain("Array"));
         // Each of these is the sole instance of its class, which is as much a
         // fact of the grammar as a string literal being a String.
         assert_eq!(receiver("true.if"), certain("True"));
@@ -969,6 +997,14 @@ mod receiver_tests {
         // `4s` is a degree rather than a plain number, and pinning it down is
         // not worth being wrong about.
         assert_eq!(receiver("4s.value"), Receiver::Unknown);
+    }
+
+    #[test]
+    fn an_ordinary_index_is_not_a_collection_literal() {
+        // `a[0]` is an element of something unknown, not an instance of
+        // anything. Only a class name in front of the `[` says a class.
+        assert_eq!(receiver("a[0].foo"), Receiver::Unknown);
+        assert_eq!(receiver("[1, 2][0].foo"), Receiver::Unknown);
     }
 
     #[test]

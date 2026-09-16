@@ -101,6 +101,23 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
   confirmed the fix: every `.sc` class file in the corpus parses again, and the
   six remaining failures are `.scd` scripts that sclang rejects too.
 
+- **A typed collection literal names its class.** `Set[1, 2].includes(x)` had
+  an unknown receiver and offered every `includes` in the image. The code said
+  otherwise — "`Set[...]` names its own class" — but looked for the name on a
+  `Collection` node, and `msgsend : classname '[' arrayelems ']'` is read
+  through the postfix chain, so it arrives as an index on a class reference and
+  a `Collection` never carries a class name at all. That branch could not have
+  fired. `IdentityDictionary[…]`, `List[…]` and `#Set[…]` resolve too.
+
+- **Three constructs the grammar has and the parser did not.** Found by reading
+  `grammar/sclang.y` against `grammar.rs` production by production, and each
+  confirmed against sclang 3.13 before being changed:
+  `classname '[' arrayelems ']'` takes the `key: value` forms, so `Set[0: 1]`
+  parses; `listlit` has a second spelling that names the class, so `#Set[1, 2]`
+  parses; and `expr binop2 adverb expr` covers `binop2 : binop | keybinop`, so
+  the adverb in `a foo: .x b` parses. None of the three occurs anywhere in a
+  stock install, which is why no sweep had found them.
+
 - **`2pi` is a Float, not an Integer.** `floatp : integer pie` — a `pi`
   suffix makes the whole literal a float, and the lexer gives `2pi` as two
   tokens, so reading only the first called it an Integer. It called it that

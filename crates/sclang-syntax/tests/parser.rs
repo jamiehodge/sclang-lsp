@@ -4,7 +4,7 @@
 //! the tree must always cover the source exactly, and parsing must never hang
 //! or panic no matter how broken the input.
 
-use sclang_syntax::{parse, Child, SyntaxKind, SyntaxNode};
+use sclang_syntax::{parse, parse_script, Child, SyntaxKind, SyntaxNode};
 
 /// Reconstruct the source from the tree's tokens.
 fn reconstruct(node: &SyntaxNode, source: &str, out: &mut String) {
@@ -92,7 +92,17 @@ fn tree(src: &str) -> String {
 
 /// Count nodes of a kind anywhere in the tree.
 fn count(src: &str, kind: SyntaxKind) -> usize {
-    parse(src)
+    count_in(&parse(src), kind)
+}
+
+/// The same, for a script — where a leading `ClassName {` is a call rather
+/// than a class definition.
+fn count_script(src: &str, kind: SyntaxKind) -> usize {
+    count_in(&parse_script(src), kind)
+}
+
+fn count_in(parsed: &sclang_syntax::Parse, kind: SyntaxKind) -> usize {
+    parsed
         .root
         .descendants()
         .iter()
@@ -383,6 +393,66 @@ fn an_array_element_may_end_with_a_semicolon() {
     }
     // One element, not two: the `;` ends the sequence rather than separating.
     assert_eq!(count("x = [1, 2;];", SyntaxKind::Collection), 1);
+}
+
+#[test]
+fn a_typed_collection_literal_takes_array_elements() {
+    // `msgsend : classname '[' arrayelems ']'` — not `arglist1`. So the
+    // `key: value` forms are available and the `..` range is not, which is the
+    // exact opposite of an index on anything else. Verified against sclang
+    // 3.13: `Set[0: 1]` compiles and `Set[1..3]` does not, while `a[0: 1]`
+    // does not and `a[1..3]` does.
+    for src in [
+        "x = Set[1, 2];",
+        "x = Set[];",
+        "x = Set[a: 1];",
+        "x = Set[0: 1, 2: 3];",
+        "x = IdentityDictionary[\\a -> 1];",
+    ] {
+        assert!(
+            parse_script(src).is_ok(),
+            "{src:?}: {:?}",
+            parse_script(src).errors
+        );
+    }
+    // Still an index on anything that is not a class name.
+    assert!(parse_script("x = a[1..3];").is_ok());
+}
+
+#[test]
+fn a_literal_array_may_name_its_class() {
+    // `listlit : '#' '[' literallistc ']' | '#' classname '[' … ']'`.
+    for src in ["x = #[1, 2];", "x = #Set[1, 2];", "x = #Set[];"] {
+        assert!(
+            parse_script(src).is_ok(),
+            "{src:?}: {:?}",
+            parse_script(src).errors
+        );
+    }
+    assert_eq!(count_script("x = #Set[1, 2];", SyntaxKind::LiteralList), 1);
+    // `#a, b = c` is still destructuring rather than a literal array.
+    assert_eq!(
+        count_script("#a, b = [1, 2];", SyntaxKind::MultiAssignExpr),
+        1,
+        "{}",
+        parse_script("#a, b = [1, 2];")
+            .root
+            .debug_tree("#a, b = [1, 2];")
+    );
+}
+
+#[test]
+fn an_adverb_follows_a_keyword_selector_too() {
+    // `expr binop2 adverb expr`, and `binop2 : binop | keybinop`. sclang
+    // compiles `a foo: .x b`; only the plain-operator case was implemented.
+    for src in ["x = a foo: .x b;", "x = a + .x b;", "x = a foo: .1 b;"] {
+        assert!(
+            parse_script(src).is_ok(),
+            "{src:?}: {:?}",
+            parse_script(src).errors
+        );
+    }
+    assert_eq!(count_script("x = a foo: .x b;", SyntaxKind::Adverb), 1);
 }
 
 #[test]
