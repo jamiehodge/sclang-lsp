@@ -212,6 +212,28 @@ fn document_symbols_nest_methods_under_their_class() {
 }
 
 #[test]
+fn a_script_buffer_does_not_declare_classes() {
+    // `Routine { … }` is a class definition in a `.sc` file and a call in a
+    // script. Opening a scratch buffer used to index the first line as a class
+    // named `Routine`, which both showed up here as a symbol and replaced
+    // whatever the class library had said about the real one.
+    let mut h = Harness::start("scriptmode", &mini_library());
+    let uri = h.open("scratch.scd", "Routine { 1.rand }.play;\n");
+
+    let response: DocumentSymbolResponse = h.request(
+        "textDocument/documentSymbol",
+        serde_json::json!({ "textDocument": { "uri": uri } }),
+    );
+    // An empty array decodes as either variant, so name what is in it rather
+    // than which shape it arrived in.
+    let names: Vec<String> = match response {
+        DocumentSymbolResponse::Nested(s) => s.into_iter().map(|s| s.name).collect(),
+        DocumentSymbolResponse::Flat(s) => s.into_iter().map(|s| s.name).collect(),
+    };
+    assert!(names.is_empty(), "a script declares no symbols: {names:?}");
+}
+
+#[test]
 fn workspace_symbols_find_classes_and_methods() {
     let mut h = Harness::start("worksym", &mini_library());
 

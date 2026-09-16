@@ -24,6 +24,7 @@ use crate::references::{OccurrenceKind, ReferenceIndex};
 use crate::scope::{locals_at, LocalKind};
 use lsp_types::{PrepareRenameResponse, TextEdit, Url, WorkspaceEdit};
 use sclang_index::SymbolIndex;
+use sclang_syntax::{tokenize, SyntaxKind};
 use std::collections::HashMap;
 
 /// What can be renamed at a point, or why it cannot.
@@ -196,28 +197,57 @@ pub fn rename(
 /// `ClassName` and anything else an `Ident`. Renaming a class to `sinOsc`
 /// would not produce a differently-named class, it would produce a syntax
 /// error at every use.
+///
+/// The test is to lex the name and see what comes out, rather than to restate
+/// the lexer's rules here. A character-by-character version was both too loose
+/// and too tight: it accepted `var`, `nil` and `inf`, which are keywords and a
+/// float literal, so renaming a local to one of them wrote `var var = 1;` into
+/// the file — a silent syntax error, which is the one thing this module exists
+/// to avoid. And it rejected a non-ASCII letter, which sclang's own character
+/// table puts in the identifier class.
 fn check_name(name: &str, class: bool) -> Result<(), String> {
-    let mut chars = name.chars();
-    let first = chars
-        .next()
-        .ok_or_else(|| "the new name is empty".to_string())?;
+    let wanted = if class {
+        SyntaxKind::ClassName
+    } else {
+        SyntaxKind::Ident
+    };
 
-    if class && !first.is_ascii_uppercase() {
-        return Err(format!(
-            "`{name}` cannot name a class: class names must begin with a capital letter"
-        ));
+    let tokens = tokenize(name);
+    let [token] = tokens.as_slice() else {
+        return Err(if tokens.is_empty() {
+            "the new name is empty".to_string()
+        } else {
+            format!("`{name}` is not a valid identifier: it is more than one token")
+        });
+    };
+    if token.kind == wanted {
+        return Ok(());
     }
-    if !class && !(first.is_ascii_lowercase() || first == '_') {
-        return Err(format!(
+
+    Err(match (class, token.kind) {
+        (true, SyntaxKind::Ident) => {
+            format!("`{name}` cannot name a class: class names must begin with a capital letter")
+        }
+        (false, SyntaxKind::ClassName) => format!(
             "`{name}` cannot name a variable: an initial capital would make it a class name"
-        ));
-    }
-    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return Err(format!(
-            "`{name}` is not a valid identifier: letters, digits and underscore only"
-        ));
-    }
-    Ok(())
+        ),
+        // `var`, `while`, `nil`, `pi` — and `inf`, which sclang lexes as a
+        // float rather than as a keyword.
+        (
+            _,
+            SyntaxKind::VarKw
+            | SyntaxKind::ArgKw
+            | SyntaxKind::ClassvarKw
+            | SyntaxKind::ConstKw
+            | SyntaxKind::WhileKw
+            | SyntaxKind::TrueKw
+            | SyntaxKind::FalseKw
+            | SyntaxKind::NilKw
+            | SyntaxKind::PiKw
+            | SyntaxKind::Float,
+        ) => format!("`{name}` is reserved: SuperCollider reads it as a keyword or a literal"),
+        _ => format!("`{name}` is not a valid identifier"),
+    })
 }
 
 #[cfg(test)]
@@ -331,5 +361,35 @@ mod tests {
     fn refuses_a_name_with_punctuation() {
         let error = try_rename("{ var foo = 1; foo }", "foo = 1", "ba-r").unwrap_err();
         assert!(error.contains("valid identifier"), "{error}");
+    }
+
+    #[test]
+    fn refuses_a_reserved_word() {
+        // These all pass a letters-and-digits test and none of them is a name:
+        // `var var = 1;` is a syntax error, and the rename that wrote it would
+        // have been silent. `inf` is here because sclang lexes it as a float
+        // rather than as a keyword, so a list of keywords would miss it.
+        for name in [
+            "var", "arg", "classvar", "const", "while", "nil", "true", "false", "pi", "inf",
+        ] {
+            let error = try_rename("{ var foo = 1; foo }", "foo = 1", name).unwrap_err();
+            assert!(error.contains("reserved"), "{name}: {error}");
+        }
+    }
+
+    #[test]
+    fn refuses_a_name_that_is_more_than_one_token() {
+        for name in ["two names", "foo:", "foo;", ""] {
+            let error = try_rename("{ var foo = 1; foo }", "foo = 1", name).unwrap_err();
+            assert!(!error.is_empty(), "{name:?} was accepted");
+        }
+    }
+
+    #[test]
+    fn accepts_a_non_ascii_letter() {
+        // sclang's character table puts a byte above ASCII in the identifier
+        // class — `var ±x = 1;` compiles — so a check stricter than the lexer
+        // would refuse a rename the language allows.
+        assert!(try_rename("{ var foo = 1; foo }", "foo = 1", "café").is_ok());
     }
 }

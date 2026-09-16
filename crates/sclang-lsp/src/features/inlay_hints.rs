@@ -75,7 +75,7 @@ fn hints_for(
         return;
     };
 
-    for (position, argument) in positional_arguments(arg_list).enumerate() {
+    for (position, argument) in positional_arguments(arg_list).into_iter().enumerate() {
         let Some(arg) = method.args.get(position) else {
             // More arguments than parameters, or a `...rest` swallowing them.
             return;
@@ -103,25 +103,42 @@ fn hints_for(
     }
 }
 
-/// The arguments passed by position, in order.
+/// The arguments passed by position, in order: one per comma-separated slot,
+/// taken at the expression that opens it.
 ///
-/// A `name:` argument is skipped rather than counted: it already says which
-/// parameter it fills, and in SuperCollider it does not advance the positional
-/// sequence either.
-fn positional_arguments(arg_list: &SyntaxNode) -> impl Iterator<Item = &Child> {
-    arg_list.children.iter().filter(|child| {
-        !child.kind().is_trivia()
-            && !matches!(
-                child.kind(),
-                SyntaxKind::LParen
-                    | SyntaxKind::RParen
-                    | SyntaxKind::Comma
-                    | SyntaxKind::KeywordArg
-                    // A trailing block, as in `if (x) { ... }`, reads clearly
-                    // enough without a label.
-                    | SyntaxKind::FunctionBlock
-            )
-    })
+/// Counting every child that is not punctuation was close but not right. An
+/// argument is an `exprseq`, so `f(a; b)` passes *one* argument whose value is
+/// `b` — counting the halves separately put the second parameter's label on
+/// the `;`, and `f(1;)` grew a label for an argument that is not there.
+fn positional_arguments(arg_list: &SyntaxNode) -> Vec<&Child> {
+    let mut out = Vec::new();
+    let mut opening = true;
+    for child in &arg_list.children {
+        match child.kind() {
+            k if k.is_trivia() => {}
+            // A new slot begins.
+            SyntaxKind::LParen | SyntaxKind::Comma => opening = true,
+            // Still inside the slot that is open.
+            SyntaxKind::Semicolon | SyntaxKind::RParen => {}
+            // `name:` says which parameter it fills, and in SuperCollider it
+            // does not advance the positional sequence either.
+            SyntaxKind::KeywordArg => opening = false,
+            // A trailing block, as in `if (x) { ... }`, reads clearly enough
+            // without a label.
+            SyntaxKind::FunctionBlock | SyntaxKind::Generator => opening = false,
+            // `f(*args)` spreads one array across every remaining parameter.
+            // It does not fill the one it sits in front of, and nothing after
+            // it has a position worth asserting.
+            SyntaxKind::SplatArg => return out,
+            _ => {
+                if opening {
+                    out.push(child);
+                    opening = false;
+                }
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -199,6 +216,29 @@ mod tests {
     fn surplus_arguments_do_not_panic() {
         let got = hints("SinOsc.ar(1, 2, 3, 4, 5)");
         assert_eq!(got.len(), 3, "one per declared parameter: {got:?}");
+    }
+
+    #[test]
+    fn a_semicolon_does_not_advance_the_parameter() {
+        // `arglist1 : exprseq`, and an `exprseq` may contain `;` — so this
+        // passes one argument whose value is `0`. Counting the halves put
+        // `phase:` on the semicolon, and `SinOsc.ar(1;)` grew a label for an
+        // argument that is not there.
+        let got = hints("SinOsc.ar(1; 0, 0.5)");
+        let labels: Vec<_> = got.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(labels, vec!["freq:", "phase:"], "{got:?}");
+        // On the `1`, not on the `;`.
+        assert_eq!(got[0].1, 10);
+        assert!(hints("SinOsc.ar(1;)").len() == 1);
+    }
+
+    #[test]
+    fn nothing_is_labelled_past_an_expanded_array() {
+        // `*args` spreads across every remaining parameter, so it does not
+        // fill the one it sits in front of and nothing after it has a
+        // position worth asserting.
+        assert!(hints("SinOsc.ar(*args)").is_empty());
+        assert!(hints("SinOsc.ar(440, *rest)").len() == 1);
     }
 
     #[test]

@@ -128,11 +128,9 @@ impl DocumentStore {
 /// text: nothing in `Routine { … }` says whether it defines a class or calls
 /// one.
 pub fn mode_for(uri: &Url) -> Mode {
-    if uri.path().ends_with(".sc") {
-        Mode::ClassFile
-    } else {
-        Mode::Script
-    }
+    // The URI's path, not the filesystem path: an unsaved buffer has no
+    // filesystem path, and `Untitled-1` is a script like any other.
+    Mode::for_file_name(uri.path())
 }
 
 pub fn uri_to_path(uri: &Url) -> PathBuf {

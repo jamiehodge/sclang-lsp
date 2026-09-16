@@ -387,3 +387,41 @@ fn a_blank_line_separates_a_comment_from_the_method() {
         None
     );
 }
+
+// =====================================================================
+// Which of the grammar's two readings a file gets
+// =====================================================================
+
+#[test]
+fn a_script_declares_no_classes() {
+    // `Routine { … }` is a class definition in a `.sc` file and a call in a
+    // script, and only the file name says which. Read as a class file, the
+    // first line of a scratch buffer declared a class named `Routine` — and
+    // indexing it replaced the real one, moving its superclass to `Object`
+    // and pointing goto-definition at the scratch buffer.
+    let ix = index(&[
+        ("/lib/Routine.sc", "Routine : Thread { next { ^1 } }"),
+        ("/home/me/scratch.scd", "Routine { 1.rand }.play;"),
+    ]);
+    let routine = ix.class("Routine").unwrap();
+    assert_eq!(routine.superclass.as_deref(), Some("Thread"));
+    assert_eq!(routine.location.file, Path::new("/lib/Routine.sc"));
+}
+
+#[test]
+fn a_script_still_indexes_nothing_of_its_own() {
+    let ix = index(&[(
+        "scratch.scd",
+        "SynthDef(\\x, { Out.ar(0, SinOsc.ar) }).add;",
+    )]);
+    assert_eq!(ix.class_count(), 0);
+    assert_eq!(ix.method_count(), 0);
+}
+
+#[test]
+fn a_class_file_is_read_as_one_whatever_it_contains() {
+    // The other half of the rule: a `.sc` file *is* class definitions, and a
+    // class whose name happens to be `Routine` is one of them.
+    let ix = index(&[("Routine.sc", "Routine : Thread { next { ^1 } }")]);
+    assert!(ix.method("Routine", "next", MethodKind::Instance).is_some());
+}

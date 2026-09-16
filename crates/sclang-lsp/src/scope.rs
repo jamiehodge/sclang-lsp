@@ -216,14 +216,22 @@ fn collect_class_slots(node: &SyntaxNode, source: &str, out: &mut Vec<Local>) {
 }
 
 /// The source text of a declaration's default value, if it has one.
+///
+/// The `=` is optional in the `| … |` argument form — `|range -1|` and
+/// `|overwrite(true)|` both declare one — and the parenthesised spelling is
+/// not a node of its own, so the default runs from whatever follows the name
+/// to the end of the declaration rather than being one child. `sclang-index`
+/// reads it the same way, and the two have to agree: they are what hover and
+/// signature help say about the same parameter.
 fn default_of(def: &SyntaxNode, source: &str) -> Option<String> {
-    let eq = def.token_of(SyntaxKind::Eq)?;
-    let value = def
+    let name = def.token_of(SyntaxKind::Ident)?;
+    let start = def
         .children
         .iter()
-        .find(|c| c.range().0 >= eq.end && !c.kind().is_trivia())?;
-    let (start, end) = value.range();
-    Some(source[start as usize..end as usize].trim().to_string())
+        .find(|c| c.range().0 >= name.end && !c.kind().is_trivia() && c.kind() != SyntaxKind::Eq)?
+        .range()
+        .0;
+    (start < def.end).then(|| source[start as usize..def.end as usize].trim().to_string())
 }
 
 /// Keep the first sighting of a name: the innermost declaration shadows.
@@ -325,6 +333,35 @@ mod tests {
             .unwrap();
         assert_eq!(freq.default.as_deref(), Some("440"));
         assert_eq!(freq.kind, LocalKind::Argument);
+    }
+
+    #[test]
+    fn a_default_written_without_an_equals_is_still_a_default() {
+        // `slotdef : name optequal slotliteral` — the `=` is optional, and the
+        // parenthesised form has no `=` at all. The index reads both, so hover
+        // has to as well or it contradicts signature help about the same
+        // parameter.
+        let source = "T { m { |range -1, overwrite(true)| ^x } }";
+        let offset = source.find("^x").unwrap() as u32 + 1;
+        let found = locals(source, offset);
+        let default = |n: &str| {
+            found
+                .iter()
+                .find(|l| l.name == n)
+                .and_then(|l| l.default.clone())
+        };
+        assert_eq!(default("range").as_deref(), Some("-1"));
+        assert_eq!(default("overwrite").as_deref(), Some("(true)"));
+    }
+
+    #[test]
+    fn a_declaration_with_no_value_has_no_default() {
+        let source = "T { m { var a; |b| ^x } }";
+        let offset = source.find("^x").unwrap() as u32 + 1;
+        assert!(locals(source, offset)
+            .iter()
+            .filter(|l| l.name == "a" || l.name == "b")
+            .all(|l| l.default.is_none()));
     }
 
     #[test]

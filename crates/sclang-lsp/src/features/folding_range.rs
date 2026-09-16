@@ -32,7 +32,7 @@ pub fn folding_ranges(doc: &Document) -> Vec<FoldingRange> {
     let mut out: Vec<FoldingRange> = Vec::new();
 
     for node in root.descendants() {
-        if !folds(node.kind) || node.end == node.start {
+        if !folds(node.kind) || node.end <= node.start {
             continue;
         }
         // `end` is exclusive, so the last byte is what names the closing line.

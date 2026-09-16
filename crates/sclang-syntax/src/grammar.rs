@@ -70,6 +70,25 @@ pub enum Mode {
     Script,
 }
 
+impl Mode {
+    /// The mode a file's name implies: `.sc` is a class file, anything else is
+    /// interpreted.
+    ///
+    /// Takes a name rather than a path so that a URI works too — an unsaved
+    /// buffer has a `untitled:Untitled-1` and no path at all. Every caller
+    /// that decides a mode from a file name goes through here, because the two
+    /// readings are not interchangeable: read as a class file, the `Routine
+    /// { … }.play` at the top of a scratch buffer defines a class called
+    /// `Routine`, and indexing that replaces the real one.
+    pub fn for_file_name(name: &str) -> Mode {
+        if name.ends_with(".sc") {
+            Mode::ClassFile
+        } else {
+            Mode::Script
+        }
+    }
+}
+
 pub(crate) fn source_file(p: &mut Parser, mode: Mode) {
     let m = p.start();
     while !p.at_end() {
@@ -179,8 +198,17 @@ fn class_body(p: &mut Parser) {
             _ if at_method_def(p) => method_def(p),
             _ => {
                 p.error(format!("expected a member, found {:?}", p.current()));
-                // Recover at the next member or the closing brace.
-                p.recover_until(&[ClassvarKw, VarKw, ConstKw, RBrace]);
+                // Recover at the next member or the closing brace. A stray
+                // `)` or `]` is neither, and the depth tracking will not step
+                // over a closer at depth zero, so recovery can leave the
+                // cursor exactly where it was — take that token here or the
+                // loop reports the same error 256 times before its fuel runs
+                // out and one of them finally moves.
+                if !p.recover_until(&[ClassvarKw, VarKw, ConstKw, RBrace]) {
+                    let stray = p.start();
+                    p.bump();
+                    stray.complete(p, ErrorNode);
+                }
             }
         }
     }

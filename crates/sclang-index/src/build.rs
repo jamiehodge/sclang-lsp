@@ -1,7 +1,7 @@
 //! Turning a parsed file into symbols.
 
 use crate::symbols::*;
-use sclang_syntax::{parse, Child, SyntaxKind, SyntaxNode};
+use sclang_syntax::{parse_with, Child, Mode, SyntaxKind, SyntaxNode};
 use std::path::Path;
 
 /// Everything one file declares.
@@ -16,8 +16,16 @@ pub struct FileSymbols {
 /// Errors in the file are not a reason to produce nothing: the parser recovers,
 /// so a file with a broken method still yields its other methods. That is the
 /// whole point of indexing from a CST rather than from a compiler.
+///
+/// The path decides how the source is read, because only the path can: a `.sc`
+/// file is class definitions and everything else is interpreted code, and
+/// nothing in `Routine { … }` says which. Read as a class file, a scratch
+/// buffer beginning `Routine { … }.play` declares a class named `Routine`,
+/// and indexing that replaces the real one — its superclass, and the file
+/// goto-definition sends you to.
 pub fn symbols_of(path: &Path, source: &str) -> FileSymbols {
-    let parsed = parse(source);
+    let mode = Mode::for_file_name(&path.to_string_lossy());
+    let parsed = parse_with(source, mode);
     let mut out = FileSymbols::default();
     walk(path, source, &parsed.root, &mut out);
     out

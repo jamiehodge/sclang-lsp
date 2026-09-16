@@ -3,6 +3,64 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## Unreleased
+
+### Fixed
+
+- **A node with no children no longer claims the wrong range.** The tree
+  builder gave one `0..0` regardless of where it was opened, and a node takes
+  its span from its first and last child — so a parent whose first child was an
+  empty node started at the top of the file, and one whose last child was
+  empty *ended* there, before it began. `Foo { var a = #; }` was enough:
+  reading that node's text panicked the indexer, which runs on every keystroke
+  and on the server's own thread, so the editor lost its language server. Two
+  more crashes had the same cause, in folding ranges and in scope lookup, and
+  the quiet cases were worse — an empty node at the end of a file collapsed the
+  root's range, and every feature that asks what is at a position went blind
+  for the whole buffer.
+
+  An empty node now keeps the zero-width range it was opened at. The parser
+  tests check the invariant directly, exhaustively over every four-character
+  input, and a new `robustness.rs` asks every feature at every position in
+  several thousand mutated files.
+
+- **One stray `)` in a class body is one diagnostic, not 257.** Neither `)`
+  nor `]` is a class member, a recovery target, or something the recovery
+  scan will step over, so it left the cursor where it was and the member loop
+  asked again from the same place — until the parser's fuel ran out 256
+  iterations later and something finally moved. The problems panel filled with
+  identical entries.
+
+- **A scratch buffer no longer replaces a real class.** `Routine { … }` is a
+  class definition in a `.sc` file and a call in a script, and only the file
+  name says which — but the indexer always read it the first way. Opening a
+  `.scd` beginning `Routine { 1.rand }.play` therefore declared a class named
+  `Routine`, which replaced the class library's: its superclass became
+  `Object`, and goto-definition on `Routine` anywhere in the workspace landed
+  in the scratch buffer. Document symbols listed the phantom too. The mode now
+  follows the file name everywhere it is decided, through one function.
+
+- **Rename refuses a reserved word.** `var`, `arg`, `nil`, `true`, `pi` and
+  `inf` all pass a letters-and-digits test and none of them is a name, so
+  renaming a local to one wrote `var var = 1;` into the file — a silent syntax
+  error, which is the one thing that module exists to avoid. The new name is
+  now lexed and has to come out as a single token of the right kind, which
+  also stops the check being *stricter* than the language: sclang's character
+  table puts a non-ASCII letter in the identifier class, so `café` is a name
+  and was being refused.
+
+- **An inlay hint no longer counts a `;` as an argument.** An argument is an
+  `exprseq`, so `SinOsc.ar(1; 0)` passes one argument whose value is `0`.
+  Counting the halves separately put the second parameter's label on the
+  semicolon, and `SinOsc.ar(1;)` grew a label for an argument that is not
+  there. Nothing is labelled past a `*args` either: it spreads across every
+  remaining parameter, so no position after it is a fact.
+
+- **Hover reads a default written without an `=`.** `optequal` really is
+  optional — `|range -1|` and `|overwrite(true)|` both declare a default — and
+  the index had always read both while the scope walk had not, so hover and
+  signature help contradicted each other about the same parameter.
+
 ## [0.11.0] — 2026-09-16
 
 ### Added

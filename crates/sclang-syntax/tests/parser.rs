@@ -24,6 +24,68 @@ fn assert_lossless(src: &str) {
     assert_eq!(rebuilt, src, "tree did not round-trip for {src:?}");
 }
 
+/// Every node's range must be a real span of the source, inside its parent's
+/// and after its previous sibling's.
+///
+/// Losslessness does not imply this: the tokens can tile the input perfectly
+/// while a node that ended up with no children claims the wrong range, and a
+/// node whose last child is one of those inherits it. That is how a node
+/// ending before it started reached the server, where reading its text
+/// panicked — `Foo { var a = #; }` was enough.
+fn assert_well_formed(src: &str) {
+    fn walk(node: &SyntaxNode, src: &str, path: &str) {
+        assert!(
+            node.start <= node.end,
+            "{path}: {:?} ends at {} before it starts at {} in {src:?}",
+            node.kind,
+            node.end,
+            node.start
+        );
+        let mut previous = node.start;
+        for (i, child) in node.children.iter().enumerate() {
+            let (start, end) = child.range();
+            let where_ = format!("{path}/{i}:{:?}", child.kind());
+            assert!(
+                start >= previous && end <= node.end,
+                "{where_}: {start}..{end} escapes {:?} {}..{} in {src:?}",
+                node.kind,
+                node.start,
+                node.end
+            );
+            previous = end;
+            if let Child::Node(n) = child {
+                walk(n, src, &where_);
+            }
+        }
+    }
+
+    let parse = parse(src);
+    assert_eq!(
+        (parse.root.start, parse.root.end),
+        (0, src.len() as u32),
+        "the root did not cover {src:?}"
+    );
+    walk(&parse.root, src, "root");
+}
+
+/// Recovery must not report the same thing over and over.
+///
+/// A recovery point the cursor cannot reach used to leave the class-body loop
+/// asking from the same place until its fuel ran out, so one stray `)` became
+/// 257 identical diagnostics in the editor. Two errors per token is the worst
+/// any well-formed recovery produces; the bound here is loose enough not to
+/// need revisiting and tight enough to catch a stall.
+fn assert_no_error_flood(src: &str) {
+    let parse = parse(src);
+    let tokens = sclang_syntax::tokenize(src).len();
+    assert!(
+        parse.errors.len() <= 4 * tokens + 4,
+        "{} errors for {tokens} tokens in {src:?}: {:?}",
+        parse.errors.len(),
+        parse.errors.first()
+    );
+}
+
 fn tree(src: &str) -> String {
     parse(src).root.debug_tree(src)
 }
@@ -80,6 +142,49 @@ fn never_hangs_on_pathological_input() {
     ] {
         let _ = parse(src); // must terminate
         assert_lossless(src);
+    }
+}
+
+#[test]
+fn node_ranges_are_well_formed() {
+    for src in [
+        "",
+        "Foo { }",
+        "Foo : Bar { baz { ^1 } }",
+        "// leading comment\nFoo { /* inner */ bar { ^1 } }",
+        // Each of these used to produce a node at `0..0`, or one ending
+        // before it started.
+        "Foo { var a = #; }",
+        "Foo  var a = #; }",
+        "aaa#",
+        "x = [1, )];",
+        "Foo { ) }",
+        "Foo { bar { ^1 } ] }",
+    ] {
+        assert_well_formed(src);
+    }
+}
+
+/// Every four-character string over the punctuation that drives the grammar.
+/// Short enough to enumerate exhaustively, which beats sampling: the shapes
+/// that break a parser are small and adjacent, and all three of the bugs this
+/// guards against show up inside four characters.
+#[test]
+fn short_inputs_are_exhaustively_survivable() {
+    let alphabet: Vec<char> = "aA1 {}()[];,:=|*#^.-<>".chars().collect();
+    let mut buffer = String::new();
+    for &a in &alphabet {
+        for &b in &alphabet {
+            for &c in &alphabet {
+                for &d in &alphabet {
+                    buffer.clear();
+                    buffer.extend([a, b, c, d]);
+                    assert_lossless(&buffer);
+                    assert_well_formed(&buffer);
+                    assert_no_error_flood(&buffer);
+                }
+            }
+        }
     }
 }
 
@@ -346,6 +451,19 @@ fn errors_carry_usable_ranges() {
             "error range out of bounds: {e:?}"
         );
         assert!(e.start <= e.end, "inverted error range: {e:?}");
+    }
+}
+
+#[test]
+fn a_stray_closer_in_a_class_body_is_reported_once() {
+    // Neither `)` nor `]` is a member, a recovery target, or something the
+    // depth tracking will step over — so recovery moved nothing and the body
+    // loop asked again from the same place, reporting the same error 257 times
+    // before the parser's fuel ran out. One squiggle, one entry in the
+    // problems panel.
+    for src in ["Foo { ) }", "Foo { bar { ^1 } ] }"] {
+        let parse = parse(src);
+        assert_eq!(parse.errors.len(), 1, "{src:?}: {:?}", parse.errors);
     }
 }
 

@@ -10,7 +10,7 @@
 //! milliseconds, and it removes a whole category of stale-index bug in
 //! exchange.
 
-use sclang_syntax::{parse, Child, SyntaxKind, SyntaxNode};
+use sclang_syntax::{parse_with, Child, Mode, SyntaxKind, SyntaxNode};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -44,8 +44,12 @@ pub struct ReferenceIndex {
 
 impl ReferenceIndex {
     /// Walk one file, replacing anything recorded from it before.
+    ///
+    /// The path picks the mode, as it does in `sclang-index`: a `.scd` read as
+    /// a class file has its leading `Routine { … }` recorded as a class
+    /// definition rather than as the send it is.
     pub fn index_file(&mut self, path: &Path, source: &str) {
-        let parsed = parse(source);
+        let parsed = parse_with(source, Mode::for_file_name(&path.to_string_lossy()));
         self.index_parsed(path, source, &parsed.root);
     }
 

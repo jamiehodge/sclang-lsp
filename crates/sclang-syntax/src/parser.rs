@@ -238,10 +238,17 @@ impl<'a> Parser<'a> {
     /// Skip tokens until one of `recovery` is at the cursor, wrapping whatever
     /// was skipped in an error node. Brace depth is tracked so that skipping
     /// does not escape the construct being recovered.
-    pub fn recover_until(&mut self, recovery: &[SyntaxKind]) {
+    ///
+    /// Returns whether anything was skipped. It frequently is not: a stray `)`
+    /// in a class body is neither a recovery target nor something the depth
+    /// tracking will step over, so the cursor does not move. A caller looping
+    /// over members has to take that token itself, or it asks again from the
+    /// same place and reports the same error until the fuel runs out.
+    pub fn recover_until(&mut self, recovery: &[SyntaxKind]) -> bool {
         if self.at_end() || self.at_any(recovery) {
-            return;
+            return false;
         }
+        let from = self.pos;
         let m = self.start();
         let mut depth = 0i32;
         while !self.at_end() {
@@ -260,7 +267,14 @@ impl<'a> Parser<'a> {
             }
             self.bump();
         }
+        if self.pos == from {
+            // Nothing to wrap. An error node over no tokens is a node the
+            // tree is better off without.
+            m.abandon(self);
+            return false;
+        }
         m.complete(self, SyntaxKind::ErrorNode);
+        true
     }
 
     /// Detect a grammar function that is looping without consuming input.
@@ -357,6 +371,15 @@ pub fn build_tree(
         }
     }
 
+    /// Where a node opened: the start of the next token, or the end of the
+    /// file once there are none left.
+    fn anchor<'t>(
+        source: &str,
+        iter: &mut std::iter::Peekable<std::slice::Iter<'t, Token>>,
+    ) -> u32 {
+        iter.peek().map_or(source.len() as u32, |t| t.start)
+    }
+
     for event in reordered {
         match event {
             Event::Start { kind, .. } => {
@@ -365,19 +388,21 @@ pub fn build_tree(
                 // node yet, so push first and let the leading trivia (a file's
                 // licence header, say) land inside it.
                 if stack.is_empty() {
+                    let at = anchor(source, &mut token_iter);
                     stack.push(SyntaxNode {
                         kind,
-                        start: 0,
-                        end: 0,
+                        start: at,
+                        end: at,
                         children: Vec::new(),
                     });
                     flush_trivia(&mut stack, &mut token_iter);
                 } else {
                     flush_trivia(&mut stack, &mut token_iter);
+                    let at = anchor(source, &mut token_iter);
                     stack.push(SyntaxNode {
                         kind,
-                        start: 0,
-                        end: 0,
+                        start: at,
+                        end: at,
                         children: Vec::new(),
                     });
                 }
@@ -424,15 +449,15 @@ pub fn build_tree(
 }
 
 /// A node spans from its first child to its last.
+///
+/// A node with no children keeps the zero-width range it was opened at. It
+/// used to be given `0..0` instead, which put an empty `ExprSeq` — the body of
+/// every `{ }` — at the top of the file, and collapsed the range of any parent
+/// whose first or last child was one. `Foo { var a = #; }` produced a node
+/// ending before it started, and reading its text panicked the server.
 fn set_range(node: &mut SyntaxNode) {
-    match (node.children.first(), node.children.last()) {
-        (Some(first), Some(last)) => {
-            node.start = first.range().0;
-            node.end = last.range().1;
-        }
-        _ => {
-            node.start = 0;
-            node.end = 0;
-        }
+    if let (Some(first), Some(last)) = (node.children.first(), node.children.last()) {
+        node.start = first.range().0;
+        node.end = last.range().1;
     }
 }
