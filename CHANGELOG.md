@@ -70,6 +70,19 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
   within it was cleared by the first one's timer, so the second region barely
   lit up — and ⌘⏎ twice in quick succession is how the thing is used.
 
+- **`2pi` is a Float, not an Integer.** `floatp : integer pie` — a `pi`
+  suffix makes the whole literal a float, and the lexer gives `2pi` as two
+  tokens, so reading only the first called it an Integer. It called it that
+  with `Certain` behind it, which is the tier that may be rendered into the
+  buffer: an inlay hint would have written Integer's parameter names into a
+  send to a Float. `pi` on its own had no class at all.
+
+- **`true`, `false` and `nil` have a class.** Each is the sole instance of
+  one, which is as much a fact of the grammar as a string literal being a
+  String — but the table of literal classes had rows for the rest and not for
+  these, so `nil.isNil` resolved to every `isNil` in the image rather than to
+  `Nil`'s. An accidental like `4s` is still left alone on purpose.
+
 - **Hover reads a default written without an `=`.** `optequal` really is
   optional — `|range -1|` and `|overwrite(true)|` both declare a default — and
   the index had always read both while the scope walk had not, so hover and

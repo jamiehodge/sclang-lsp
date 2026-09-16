@@ -250,6 +250,11 @@ impl SyntaxKind {
     }
 
     /// Any literal value.
+    ///
+    /// `true`, `false`, `nil` and `pi` are here as well as in
+    /// [`Self::is_keyword`], and both are true of them: the lexer gives each
+    /// its own kind because it recognises the word, and `lang11d`'s `literal`
+    /// production lists all four. They name a value, not a construct.
     pub fn is_literal(self) -> bool {
         matches!(
             self,
@@ -261,6 +266,10 @@ impl SyntaxKind {
                 | Self::String
                 | Self::Symbol
                 | Self::Char
+                | Self::TrueKw
+                | Self::FalseKw
+                | Self::NilKw
+                | Self::PiKw
         )
     }
 

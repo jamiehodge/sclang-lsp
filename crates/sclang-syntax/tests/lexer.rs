@@ -4,7 +4,7 @@
 //! construct. A few assert *invariants* that must hold for any input at all —
 //! those are the ones that catch the bugs nobody thought to write a case for.
 
-use sclang_syntax::{tokenize, SyntaxKind::*, Token};
+use sclang_syntax::{tokenize, SyntaxKind, SyntaxKind::*, Token};
 
 /// Token kinds, with trivia dropped. Convenient for asserting shape.
 fn kinds(src: &str) -> Vec<sclang_syntax::SyntaxKind> {
@@ -95,6 +95,98 @@ fn never_panics_on_arbitrary_bytes() {
     for s in ["\u{1F600}", "é", "日本語", "\u{0}"] {
         assert_lossless(s);
     }
+}
+
+/// `is_token` is a comparison against `Eof`'s position in the enum, so the
+/// split between what the lexer produces and what the parser produces is held
+/// by declaration order and by a comment. A kind appended after `Eof` — which
+/// is where one naturally goes — would be called a node with nothing to say
+/// so, and the two predicates would disagree with the thing they describe.
+#[test]
+fn every_kind_the_lexer_emits_is_a_token_kind() {
+    // Between them these cover every variant `scan` can return.
+    let corpus = concat!(
+        "// comment\n/* block */ Foo : Bar { var <a, >b, <>c;\n",
+        "  *new { |x = 1 ...rest| ^super.new(x, key: \\sym) }\n",
+        "  ++ { arg y; _Prim_Thing; ^y.value(_) }\n",
+        "}\n",
+        "x = [1, 1.5, 16rFF, 0x1F, 1e-8, 4s, $c, 'quoted', \"str\", true, false, nil, pi];\n",
+        "~e = (a: 1); y = #[1, 2]; z = #{ |q| q }; w = a[0..2]; v = `r; u = 2 <- 3;\n",
+        "t = a <> b; s = -a + b * c / d % e; r = a ... b; q = a.b.(1); ?? \u{7}\n",
+    );
+
+    let mut seen = std::collections::BTreeSet::new();
+    for token in tokenize(corpus) {
+        assert!(
+            token.kind.is_token(),
+            "{:?} came out of the lexer but is_token() says it is a node",
+            token.kind
+        );
+        assert!(!token.kind.is_node());
+        seen.insert(format!("{:?}", token.kind));
+    }
+
+    // Enough of the set to make the assertion above worth something, and to
+    // fail loudly if the corpus stops covering the interesting kinds.
+    for kind in [
+        "Whitespace",
+        "LineComment",
+        "BlockComment",
+        "Integer",
+        "Float",
+        "RadixInteger",
+        "HexInteger",
+        "Accidental",
+        "String",
+        "Symbol",
+        "Char",
+        "Ident",
+        "ClassName",
+        "PrimitiveName",
+        "CurryArg",
+        "KeywordBinop",
+        "VarKw",
+        "ArgKw",
+        "TrueKw",
+        "FalseKw",
+        "NilKw",
+        "PiKw",
+        "BinOp",
+        "LeftArrow",
+        "ReadWriteVar",
+        "Pipe",
+        "Lt",
+        "Gt",
+        "Minus",
+        "Star",
+        "Plus",
+        "Eq",
+        "LParen",
+        "LBrace",
+        "LBracket",
+        "Semicolon",
+        "Comma",
+        "Dot",
+        "DotDot",
+        "Ellipsis",
+        "Colon",
+        "Caret",
+        "Hash",
+        "BeginClosedFunc",
+        "Backtick",
+        "Tilde",
+        "Error",
+    ] {
+        assert!(
+            seen.contains(kind),
+            "{kind} is no longer covered by the corpus"
+        );
+    }
+
+    // And the boundary itself, which nothing else would notice moving.
+    assert!(SyntaxKind::Eof.is_token());
+    assert!(SyntaxKind::SourceFile.is_node());
+    assert!(SyntaxKind::ErrorNode.is_node());
 }
 
 // =====================================================================

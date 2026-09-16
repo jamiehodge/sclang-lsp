@@ -347,6 +347,16 @@ pub fn instance_class(node: &SyntaxNode, source: &str) -> Option<(String, Certai
         SyntaxKind::LiteralList => Some(("Array".to_string(), Certain)),
 
         SyntaxKind::Literal => {
+            // `floatp : floatr pie | integer pie | pie` — a `pi` suffix makes
+            // the whole literal a Float whatever it is written on. The lexer
+            // gives `2pi` two tokens, so reading only the first called it an
+            // Integer, and called it that with `Certain` behind it: an inlay
+            // hint would have written Integer's parameter names into a send to
+            // a Float.
+            if node.child_tokens().any(|t| t.kind == SyntaxKind::PiKw) {
+                return Some(("Float".to_string(), Certain));
+            }
+
             let token = node.child_tokens().find(|t| t.kind.is_literal())?;
             Some((
                 match token.kind {
@@ -357,6 +367,12 @@ pub fn instance_class(node: &SyntaxNode, source: &str) -> Option<(String, Certai
                     SyntaxKind::Float => "Float",
                     SyntaxKind::Symbol => "Symbol",
                     SyntaxKind::Char => "Char",
+                    // `true`, `false` and `nil` are each the sole instance of
+                    // a class, which is as much a fact of the grammar as a
+                    // string literal being a String.
+                    SyntaxKind::TrueKw => "True",
+                    SyntaxKind::FalseKw => "False",
+                    SyntaxKind::NilKw => "Nil",
                     // An accidental like `4s` is a degree, not a plain number,
                     // and pinning it down is not worth being wrong about.
                     _ => return None,
@@ -928,6 +944,31 @@ mod receiver_tests {
         assert_eq!(receiver("\\sym.asString"), certain("Symbol"));
         assert_eq!(receiver("$c.ascii"), certain("Char"));
         assert_eq!(receiver("(a: 1).keys"), certain("Event"));
+        // Each of these is the sole instance of its class, which is as much a
+        // fact of the grammar as a string literal being a String.
+        assert_eq!(receiver("true.if"), certain("True"));
+        assert_eq!(receiver("false.not"), certain("False"));
+        assert_eq!(receiver("nil.isNil"), certain("Nil"));
+    }
+
+    #[test]
+    fn a_pi_suffix_makes_the_whole_literal_a_float() {
+        // `2pi` is 6.28…, and the lexer gives it as two tokens. Reading only
+        // the first called it an Integer — and called it that with `Certain`
+        // behind it, so an inlay hint would have written Integer's parameter
+        // names into a send to a Float.
+        assert_eq!(receiver("2pi.round"), certain("Float"));
+        assert_eq!(receiver("0.5pi.round"), certain("Float"));
+        assert_eq!(receiver("pi.round"), certain("Float"));
+        // Without the suffix it is still an integer.
+        assert_eq!(receiver("2.round"), certain("Integer"));
+    }
+
+    #[test]
+    fn an_accidental_is_still_left_alone() {
+        // `4s` is a degree rather than a plain number, and pinning it down is
+        // not worth being wrong about.
+        assert_eq!(receiver("4s.value"), Receiver::Unknown);
     }
 
     #[test]
