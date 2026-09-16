@@ -86,3 +86,60 @@ test('a runtime error with no file is not a compile error', () => {
 
     assert.deepEqual(batch.errors, []);
 });
+
+test('a pass with several broken files reports each of them', () => {
+    // The ordinary case after installing a quark that does not compile: one
+    // report per file, each followed by the summary line and a rule. The
+    // parser has to come back to a clean state between them.
+    const parser = new CompileErrorParser();
+    const batch = parser.feed(
+        `compiling class library...
+ERROR: syntax error, unexpected '}'
+  in file '/tmp/a/A.sc'
+  line 4 char 2:
+
+  \t}
+   ^
+-----------------------------------
+ERROR: syntax error, unexpected VAR, expecting '}'
+  in file '/tmp/a/B.sc'
+  line 9 char 3:
+
+  \tvar x;
+    ^
+-----------------------------------
+ERROR: file '/tmp/a/A.sc' parse failed
+error parsing
+`,
+    );
+
+    assert.deepEqual(
+        batch.errors.map((e) => [e.file, e.line, e.character]),
+        [
+            ['/tmp/a/A.sc', 3, 1],
+            ['/tmp/a/B.sc', 8, 2],
+        ],
+    );
+});
+
+test('two errors in one file are both kept', () => {
+    const parser = new CompileErrorParser();
+    const batch = parser.feed(
+        `compiling class library...
+ERROR: first problem
+  in file '/tmp/a/A.sc'
+  line 4 char 2:
+
+-----------------------------------
+ERROR: second problem
+  in file '/tmp/a/A.sc'
+  line 9 char 1:
+
+`,
+    );
+
+    assert.deepEqual(
+        batch.errors.map((e) => e.line),
+        [3, 8],
+    );
+});

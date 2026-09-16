@@ -121,6 +121,11 @@ function registerSclang(context: vscode.ExtensionContext): void {
     const flash = vscode.window.createTextEditorDecorationType({
         backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
     });
+    // The pending un-flash. Held so a second evaluation within `FLASH_MS`
+    // cancels the first one's timer instead of being cleared by it — ⌘⏎ twice
+    // in quick succession is how the thing is used, and the second region
+    // barely lit up.
+    let unflash: ReturnType<typeof setTimeout> | undefined;
 
     context.subscriptions.push(
         owned,
@@ -163,7 +168,11 @@ function registerSclang(context: vscode.ExtensionContext): void {
             }
 
             editor.setDecorations(flash, [region.range]);
-            setTimeout(() => editor.setDecorations(flash, []), FLASH_MS);
+            clearTimeout(unflash);
+            unflash = setTimeout(() => {
+                unflash = undefined;
+                editor.setDecorations(flash, []);
+            }, FLASH_MS);
 
             await guard(
                 owned.evaluate(region.text, {

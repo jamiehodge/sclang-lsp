@@ -314,9 +314,15 @@ impl<'a> Walker<'a> {
         // A class's own slots come from the tree above; the ones it inherits
         // are written in another class and often another file, and without
         // them `pattern` in `Pgate` paints as an ordinary variable.
+        //
+        // Put back on the way out. Classes do not nest, so this is never a
+        // stack — but what follows one in the file is not inside it, and a
+        // `.sc` file being typed into has loose code after an unbalanced brace
+        // constantly. Leaving the last class's slots in place painted those
+        // names as properties of a class they are not in.
         let class_scope = matches!(node.kind, SyntaxKind::ClassDef | SyntaxKind::ClassExtension);
-        if class_scope {
-            self.slots = node
+        let outer_slots = class_scope.then(|| {
+            let inherited = node
                 .token_of(SyntaxKind::ClassName)
                 .map(|t| {
                     class_slots(self.index, t.text(self.source))
@@ -325,7 +331,8 @@ impl<'a> Walker<'a> {
                         .collect()
                 })
                 .unwrap_or_default();
-        }
+            std::mem::replace(&mut self.slots, inherited)
+        });
 
         for child in &node.children {
             match child {
@@ -334,6 +341,9 @@ impl<'a> Walker<'a> {
             }
         }
 
+        if let Some(outer) = outer_slots {
+            self.slots = outer;
+        }
         if opens_scope {
             self.scopes.pop();
         }
@@ -428,6 +438,14 @@ impl<'a> Walker<'a> {
 
             // Unambiguous operators: these characters have no other job.
             BinOp | LeftArrow | DotDot | Ellipsis | Backtick => Some((Type::Operator, 0)),
+
+            // `=` binds a value to a name in a declaration exactly as it does
+            // in an assignment. Only the assignment was listed below, so the
+            // same character was an operator in `x = 1` and uncoloured in
+            // `var x = 1` two lines away.
+            Eq if matches!(parent.kind, VarDef | SlotDef | MultiAssignExpr | Qualifier) => {
+                Some((Type::Operator, 0))
+            }
 
             // The rest are operators only in some positions. `|` also delimits
             // an argument list, `+` also opens a class extension, `*` also
@@ -685,6 +703,7 @@ fn split_lines(source: &str, start: u32, end: u32) -> Vec<(u32, u32)> {
 mod tests {
     use super::*;
     use lsp_types::Position;
+    use std::path::Path;
 
     /// One decoded token: the text it covers, and what it was called.
     #[derive(Debug, PartialEq, Eq)]
@@ -881,6 +900,48 @@ mod tests {
         let uses: Vec<_> = found.iter().filter(|d| d.text == "count").collect();
         assert_eq!(uses[1].ty, "property");
         assert!(uses[1].modifiers.is_empty());
+    }
+
+    #[test]
+    fn inherited_slots_do_not_outlive_the_class_body() {
+        // The slots of the class being walked come from the index, and used to
+        // be left in place on the way out — so a name written after the class
+        // was painted as a property of a class it is not in. Loose code after
+        // an unbalanced brace is the ordinary state of a file being typed.
+        let mut index = SymbolIndex::default();
+        index.index_file(Path::new("Base.sc"), "Base : Object { var inherited; }");
+        index.index_file(Path::new("Foo.sc"), "Foo : Base { }");
+
+        let source = "Foo : Base { m { ^inherited } }\ninherited.postln;";
+        let doc = Document::new(source.to_string(), 1);
+        let found = decode(
+            source,
+            &semantic_tokens(&doc, &index, PositionEncoding::Utf16),
+        );
+
+        let uses: Vec<_> = found.iter().filter(|d| d.text == "inherited").collect();
+        assert_eq!(uses[0].ty, "property", "inside the class body");
+        assert_eq!(uses[1].ty, "variable", "after it");
+    }
+
+    #[test]
+    fn an_equals_is_an_operator_in_a_declaration_too() {
+        // The same character doing the same job: it was coloured in `x = 1`
+        // and left alone in `var x = 1` two lines away.
+        for source in [
+            "T { var alpha = 1; m { ^alpha } }",
+            "T { m { var beta = 2; ^beta } }",
+        ] {
+            assert_eq!(
+                type_of(&tokens(source), "=").as_deref(),
+                Some("operator"),
+                "{source}"
+            );
+        }
+        assert_eq!(
+            type_of(&script("#a, b = [1, 2];"), "=").as_deref(),
+            Some("operator")
+        );
     }
 
     #[test]

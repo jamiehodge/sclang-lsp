@@ -56,6 +56,20 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
   there. Nothing is labelled past a `*args` either: it spreads across every
   remaining parameter, so no position after it is a fact.
 
+- **Inherited slots stop at the end of the class body.** The slots of the
+  class being walked come from the index and were left in place on the way
+  out, so a name written after the class was painted as a property of a class
+  it is not in. Loose code after an unbalanced brace is the ordinary state of a
+  file being typed into.
+
+- **`=` is an operator in a declaration too.** Only the assignment form was
+  listed, so the same character was coloured in `x = 1` and left alone in
+  `var x = 1` two lines away.
+
+- **The evaluated-region flash lasts its full quarter second.** A second ⌘⏎
+  within it was cleared by the first one's timer, so the second region barely
+  lit up — and ⌘⏎ twice in quick succession is how the thing is used.
+
 - **Hover reads a default written without an `=`.** `optequal` really is
   optional — `|range -1|` and `|overwrite(true)|` both declare a default — and
   the index had always read both while the scope walk had not, so hover and
