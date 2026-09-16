@@ -3,7 +3,7 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
-## [Unreleased]
+## [0.11.0] — 2026-09-16
 
 ### Added
 
@@ -504,6 +504,7 @@ First release.
   `sc_lexer`, symbol-for-symbol against the compiled class library, and
   selector-for-selector against a patched sclang's parse dump.
 
+[0.11.0]: https://github.com/jamiehodge/sclang-lsp/releases/tag/v0.11.0
 [0.10.0]: https://github.com/jamiehodge/sclang-lsp/releases/tag/v0.10.0
 [0.9.0]: https://github.com/jamiehodge/sclang-lsp/releases/tag/v0.9.0
 [0.8.0]: https://github.com/jamiehodge/sclang-lsp/releases/tag/v0.8.0
