@@ -4,17 +4,25 @@
 [![Release](https://img.shields.io/github/v/release/jamiehodge/sclang-lsp)](https://github.com/jamiehodge/sclang-lsp/releases/latest)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 
-A language server for SuperCollider.
-
-Completion that knows the class library. Hover with real signatures and the
-comment above the definition. Goto-definition, find-references, rename,
-document and workspace symbols, inlay hints, and syntax errors as you type.
+A language server for SuperCollider: completion, hover, goto-definition,
+find-references, rename, document and workspace symbols, inlay hints, and
+syntax errors as you type.
 
 It reads SuperCollider by parsing it, so it works on code that does not
 compile, while sclang is busy, and on a machine with no SuperCollider
 installed at all. It never starts sclang and never talks to one.
 
+- [What you get](#what-you-get) — every request, and what each one really answers
+- [Install](#install) — VS Code, Claude Code, Neovim, Emacs, Helix
+- [Configuration](#configuration) — class library paths, indexing, colour
+- [Running code](#running-code) — why that is the editor's job
+- [Formatting](#formatting) — an indenter, not a formatter
+- [What it does not do](#what-it-does-not-do) — and why each one is deliberate
+- [Why you can trust it](#why-you-can-trust-it) — checked against sclang itself
+
 ## What you get
+
+Every request the server answers:
 
 | | |
 |---|---|
@@ -40,6 +48,9 @@ the server asks the client to watch `.sc` files, so a `git checkout` or a quark
 install does not leave the index describing code that has moved.
 
 ## Install
+
+The server is a single binary. VS Code and Claude Code have packaged paths;
+everything else points at it directly.
 
 ### VS Code
 
@@ -149,9 +160,7 @@ for what it was already doing.
 Only the VS Code path is exercised here; the three snippets above are offered
 untested, and corrections are welcome.
 
-Syntax colouring needs nothing set up. The server offers semantic tokens to
-every client, and a client that does not consume them simply never asks; one
-that has a grammar of its own layers ours over it rather than replacing it.
+## Configuration
 
 The class library is found automatically, along with `Extensions` and
 `downloaded-quarks` — and with whatever `sclang_conf.yaml` adds, which is
@@ -168,6 +177,10 @@ tree — pass paths in `initializationOptions`:
 Indexing runs in the background, so startup is immediate. The stock class
 library takes about half a second, after which requests are well under a
 millisecond.
+
+Syntax colouring needs nothing set up. The server offers semantic tokens to
+every client, and a client that does not consume them simply never asks; one
+that has a grammar of its own layers ours over it rather than replacing it.
 
 ## Running code
 
