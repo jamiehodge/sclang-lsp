@@ -1,0 +1,12 @@
+[package]
+name = "sclang-scdoc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Parser for SCDoc, SuperCollider's help-file format, derived from upstream's own"
+
+[dependencies]

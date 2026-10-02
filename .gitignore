@@ -11,3 +11,5 @@ editors/vscode/server/
 oracle/oracle-resolution.tsv
 oracle/oracle-scd.tsv
 oracle/scd-corpus/
+oracle/scdoc/
+oracle/scdoc_dump

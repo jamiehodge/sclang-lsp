@@ -3,6 +3,17 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## Unreleased
+
+### Added
+
+- **A parser for help files.** `sclang-scdoc` reads `.schelp` files into the
+  tree sclang itself builds from them, ported from upstream's SCDoc lexer and
+  grammar as of 3.14.1. Nothing in the server uses it yet; it is the ground
+  for documentation in hover, completion and signature help, which today show
+  only the comment above a definition. It agrees with upstream's own parser on
+  every help file in 3.13.0 and 3.14.1, and on 48,132 damaged copies of them.
+
 ## [0.12.1] — 2026-09-16
 
 ### Changed

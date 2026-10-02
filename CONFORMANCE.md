@@ -101,7 +101,9 @@ means the token model is faithful, not that the language is fully handled.
 Four, because they check different layers: tokens, symbols, dispatch, and the
 syntax a scratch buffer actually contains. A fifth, against sclang's own parse
 trees, is further down under *Parse-tree dump* — it needs a patched build of
-SuperCollider rather than an installed one, which is why it sits apart.
+SuperCollider rather than an installed one, which is why it sits apart. Help
+files are a different language with a different parser, and have a section of
+their own at the end.
 
 Every number below was measured against SuperCollider **3.13.0** on macOS, with
 the stock class library plus this machine's Extensions and quarks. They move
@@ -421,6 +423,76 @@ before the oracle was worth anything:
 - `PyrCurryArgNode::dump` never dumped its `mNext`, alone among node types, so
   an argument list was truncated at the first `_` and everything after it
   vanished. This accounted for the last ten disagreements.
+
+## Help files: against SCDoc's own parser
+
+`.schelp` files are not SuperCollider; they are SCDoc, with its own flex lexer
+(`SCDoc/SCDoc.l`) and bison grammar (`SCDoc/SCDoc.y`). `sclang-scdoc` ports
+both, along with the `doc_node_fixup_tree` pass that runs over every tree, and
+builds the same `DocNode` tree sclang hands the class library as `SCDocNode`.
+
+Unlike the class-library oracles, this one needs no sclang. Upstream checks
+the generated parser into the repository next to its sources, along with a
+standalone driver that prints a file's tree, so the oracle is upstream's own
+code built with nothing but a C++ compiler. `Node::dump` prints the same
+format, and the comparison is of whole trees, byte for byte.
+
+```bash
+./oracle/build-scdoc.sh                # default ref: Version-3.14.1
+cargo run --release -p sclang-scdoc --example scdoc_oracle -- \
+  oracle/scdoc_dump [--mutate N] <dir>...
+```
+
+Each file is read in the mode sclang renders it with — partial for an
+`.ext.schelp`, full otherwise — and again in metadata mode, which is how sclang
+indexes it. Measured on Linux with the 3.14.1 parser, over two corpora: the
+`HelpSource` of a 3.14.1 checkout, and the 3.13.0 one Ubuntu installs.
+
+```
+corpus           3.14.1          3.13.0
+files            1,146           1,125
+parses compared  2,292           2,250
+agreed exactly   2,292 (100%)    2,250 (100%)
+  both rejected  1               1
+```
+
+The file both reject is `String.ext.schelp` in metadata mode, which sclang never
+reads it in.
+
+The port follows 3.14.1, which added `subsubsection::`, inline `math::` and
+math blocks; `develop` is identical to it. 3.13's parser has no rules for those
+tags, and on a corpus that does not use them the two agree — the 3.13.0 column
+above, and the same run against a 3.13.0 build of the oracle.
+
+Installed help files are almost all well-formed, so on their own they barely
+exercise the rejection paths — and a file being edited is malformed most of
+the time. `--mutate N` adds N damaged copies of each file: a span deleted, or
+one of the delimiters the lexer gives meaning to spliced in, seeded so a run is
+reproducible.
+
+```
+--mutate 20 over 3.14.1
+parses compared  48,132
+agreed exactly   48,132 (100%)
+  both rejected  12,287
+```
+
+Upstream's only recovery is to discard the tree (`start: document error`), so
+neither does this: one error and the file is rejected, as upstream would
+render nothing for it.
+
+The oracle has teeth. Injected one at a time, each of these is caught on the 3.14.1 corpus:
+
+| bug | agreement |
+|---|---|
+| lexer ties go to the later rule | 64.49% |
+| a line break inside prose joins as nothing instead of a space | 78.45% |
+| `classmethods::` stops setting the method kind | 30.19% |
+| trailing whitespace is not stripped | 99.96% — one argument, in `SynthDescLib` |
+
+That last row is also why `tests/upstream.rs` exists: it pins constructs the
+corpus exercises lightly or not at all, with every expected tree produced by
+upstream's parser rather than written by hand, and runs in CI.
 
 ## Stability properties
 
