@@ -11,11 +11,17 @@
 //! The lexer never consults the parser — every start condition change is made
 //! by a lexer action — so the whole file is tokenized up front.
 //!
+//! Trying every rule at every byte costs most of the time, nearly all of it on
+//! rules that cannot match: a tag rule needs a blank or its own first letter.
+//! So each state has a table, by first byte, of the rules that could. It
+//! narrows which rules are tried and changes nothing about which one wins.
+//!
 //! Like flex, this works on bytes. `.` matches one byte, so a multi-byte
 //! character arrives as several `Text` tokens; every consumer concatenates
 //! adjacent text, so they are always rejoined.
 
 use crate::Mode;
+use std::sync::OnceLock;
 
 /// A token kind, named after the `%token` declarations in `SCDoc.y`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,13 +88,22 @@ pub(crate) enum Tok {
     End,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Token {
     pub kind: Tok,
-    /// `yylval.str`, for the kinds that set it.
-    pub text: Vec<u8>,
     /// Byte offset of the token's first byte.
     pub start: usize,
+    pub end: usize,
+    /// The text an action substitutes for `yytext`, such as `"    "` for a
+    /// tab in a code block.
+    pub replaced: Option<&'static [u8]>,
+}
+
+impl Token {
+    /// `yylval.str`, for the kinds that set it.
+    pub fn text<'a>(&self, src: &'a [u8]) -> &'a [u8] {
+        self.replaced.unwrap_or(&src[self.start..self.end])
+    }
 }
 
 /// flex start conditions. All are exclusive (`%x`), so a rule with no
@@ -109,6 +124,17 @@ impl State {
     const fn bit(self) -> u8 {
         1 << self as u8
     }
+
+    const ALL: [State; 8] = [
+        State::Initial,
+        State::Verbatim,
+        State::Verbatim2,
+        State::Metadata,
+        State::Eat,
+        State::Eat2,
+        State::Eat3,
+        State::Method,
+    ];
 }
 
 const I: u8 = State::Initial.bit();
@@ -352,12 +378,12 @@ pub(crate) fn lex(src: &[u8], mode: Mode) -> Vec<Token> {
     let mut out = Vec::new();
     let mut pos = 0;
 
+    let candidates = candidates();
     while pos < src.len() {
         let mut best: Option<(usize, &Rule)> = None;
-        for rule in RULES {
-            if rule.states & state.bit() == 0 {
-                continue;
-            }
+        // In rule order, so the first of equal-length matches still wins.
+        for &i in &candidates[state as usize][src[pos] as usize] {
+            let rule = &RULES[i as usize];
             if let Some(len) = matches(rule.pat, &src[pos..]) {
                 // Strictly longer, so the earlier rule keeps a tie.
                 if len > 0 && best.is_none_or(|(l, _)| len > l) {
@@ -374,27 +400,30 @@ pub(crate) fn lex(src: &[u8], mode: Mode) -> Vec<Token> {
             pos += 1;
             continue;
         };
-        let lexeme = &src[pos..pos + len];
-        let token = |kind, text: &[u8]| Token {
+        let token = |kind| Token {
             kind,
-            text: text.to_vec(),
             start: pos,
+            end: pos + len,
+            replaced: None,
         };
         match rule.act {
-            Ret(kind) => out.push(token(kind, lexeme)),
-            RetText(text) => out.push(token(Tok::Text, text)),
+            Ret(kind) => out.push(token(kind)),
+            RetText(text) => out.push(Token {
+                replaced: Some(text),
+                ..token(Tok::Text)
+            }),
             RetTo(kind, to) => {
                 state = to;
-                out.push(token(kind, lexeme));
+                out.push(token(kind));
             }
             Method => {
                 method_caller = state;
                 state = State::Method;
-                out.push(token(Tok::Method, lexeme));
+                out.push(token(Tok::Method));
             }
             MethodEnd => {
                 state = method_caller;
-                out.push(token(Tok::Newline, lexeme));
+                out.push(token(Tok::Newline));
             }
             To(to) => state = to,
             Skip => {}
@@ -404,10 +433,55 @@ pub(crate) fn lex(src: &[u8], mode: Mode) -> Vec<Token> {
 
     out.push(Token {
         kind: Tok::End,
-        text: Vec::new(),
         start: src.len(),
+        end: src.len(),
+        replaced: None,
     });
     out
+}
+
+/// For each state and first byte, the rules that could match there, in rule
+/// order.
+fn candidates() -> &'static [Vec<Vec<u8>>] {
+    static TABLE: OnceLock<Vec<Vec<Vec<u8>>>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut table = vec![vec![Vec::new(); 256]; State::ALL.len()];
+        for state in State::ALL {
+            for byte in 0..=255u8 {
+                table[state as usize][byte as usize] = RULES
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, r)| r.states & state.bit() != 0 && may_start(r.pat, byte))
+                    .map(|(i, _)| u8::try_from(i).expect("fewer than 256 rules"))
+                    .collect();
+            }
+        }
+        table
+    })
+}
+
+/// Whether a match of `pat` can begin with `b`. Over-approximate is fine;
+/// under-approximate would silently lose matches.
+fn may_start(pat: Pat, b: u8) -> bool {
+    let blank = b == b' ' || b == b'\t';
+    let first = |name: &str| b.eq_ignore_ascii_case(&name.as_bytes()[0]);
+    match pat {
+        Tag(name) | TagNl(name) | Block(name) => blank || first(name),
+        Inline(name) | InlineNl(name) => first(name),
+        TagSym => blank || matches!(b, b'\n' | b'\r' | b':'),
+        NlTagSym | NlEscapedTagSym | Newlines | EmptyLines => b == b'\n',
+        Pair(c) => blank || b == c,
+        Lit(lit) => lit[0] == b,
+        Comma => blank || b == b',',
+        Blanks => blank,
+        Url | Alpha => b.is_ascii_alphabetic(),
+        MethodName => b.is_ascii_lowercase() || b"-<>@|&%*+/!?=".contains(&b),
+        MethodArgs => b == b'(',
+        MethodBlanks => blank || b == b'\r',
+        Digits => b.is_ascii_digit(),
+        Punct => b.is_ascii_digit() || b".!?(){}[]'\"".contains(&b),
+        VerbatimRun | MetadataRun | OneNotSpecial | Any | AnyNl => matches(pat, &[b]).is_some(),
+    }
 }
 
 /// The length of `pat`'s longest match at the start of `s`.
@@ -533,6 +607,11 @@ fn matches(pat: Pat, s: &[u8]) -> Option<usize> {
 
 /// `name::`, with the name matched case-insensitively as `(?i:…)` does.
 fn tag_name(s: &[u8], name: &str) -> Option<usize> {
+    // Most calls are at a blank that is not followed by any tag, so settle
+    // those on one byte.
+    if !s.first()?.eq_ignore_ascii_case(&name.as_bytes()[0]) {
+        return None;
+    }
     let n = name.len();
     let head = s.get(..n)?;
     (head.eq_ignore_ascii_case(name.as_bytes()) && s[n..].starts_with(b"::")).then_some(n + 2)
@@ -581,11 +660,12 @@ mod tests {
 
     #[test]
     fn a_code_block_closes_only_at_the_start_of_a_line() {
-        let toks = lex(b"code::\na::b\n::", Mode::Full);
+        let src = b"code::\na::b\n::";
+        let toks = lex(src, Mode::Full);
         let text: Vec<u8> = toks
             .iter()
             .filter(|t| t.kind == Tok::Text)
-            .flat_map(|t| t.text.clone())
+            .flat_map(|t| t.text(src).to_vec())
             .collect();
         assert_eq!(text, b"a::b");
         assert_eq!(toks.last().unwrap().kind, Tok::End);

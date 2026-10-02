@@ -58,8 +58,9 @@ impl std::error::Error for Error {}
 /// a help file that is not valid UTF-8 still parses, and its text comes back
 /// with the invalid sequences replaced.
 pub fn parse(source: impl AsRef<[u8]>, mode: Mode) -> Result<Node, Error> {
-    let tokens = lexer::lex(source.as_ref(), mode);
-    let mut root = parser::parse(&tokens, mode)?;
+    let source = source.as_ref();
+    let tokens = lexer::lex(source, mode);
+    let mut root = parser::parse(source, &tokens, mode)?;
     tree::fixup(&mut root);
     Ok(root.into_node())
 }
