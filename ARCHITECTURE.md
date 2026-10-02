@@ -49,6 +49,12 @@ build product that only exists once someone has opened that page. Reading the
 source is the same move as reading `.sc` files: `sclang-scdoc` is a port of
 upstream's own SCDoc parser, so the tree is the one sclang would build.
 
+A whole page is the one place the server writes a file. It renders the page
+as SuperCollider — prose in comments, examples as code — into a cache
+directory, and asks the editor to open it with `window/showDocument`. Running
+the examples is then exactly what running anything else is: the editor's, with
+the server answering only the question of where a region begins and ends.
+
 The cost of dropping it is small and specific, and it is listed under
 *Deliberately not done* below rather than hidden.
 

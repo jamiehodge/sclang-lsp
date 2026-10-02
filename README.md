@@ -41,6 +41,7 @@ Every request the server answers:
 | **Folding** | Regions, class and method bodies, collections and block comments — including the `( … )` idiom indentation folding cannot see |
 | **Selection ranges** | Expand-selection, following the real syntax |
 | **Formatting** | Indentation on save or over a selection. Leading whitespace only: no line break moves, and columns you aligned by hand stay aligned |
+| **Help pages** | A code action on a class or method name — and the `sclang.showHelp` command — that opens its help page as a `.scd` file: prose as comments, examples as code ready to evaluate, opened at the entry asked for |
 
 Unsaved edits count immediately: a class that exists only in a buffer is
 visible to completion everywhere else. Files that change on disk count too —
@@ -175,6 +176,10 @@ tree — pass paths in `initializationOptions`:
 { "classLibraryPaths": ["/path/to/SCClassLibrary"] }
 ```
 
+Help pages are written to the platform's cache directory (`~/.cache/sclang-lsp`
+on Linux, `~/Library/Caches/sclang-lsp` on macOS, `%LOCALAPPDATA%\sclang-lsp`
+on Windows), or to `helpDirectory` if it is set.
+
 Help is found the way sclang finds it: the `HelpSource` beside the class
 library, and any `HelpSource` inside an extension or a quark. A quark's
 `Classes/Foo.ext.schelp` documents what it adds to `Foo`, and shows up there.
@@ -267,11 +272,19 @@ tree-sitter `indents.scm` in Helix, Zed and Neovim whatever this server knows.
 Vim's `=` and Emacs' TAB do not route through it either. That is a second
 reason a tree-sitter grammar is worth having.
 
-**Help is text in a popup, not pages.** The help files supply the words in
-hover, completion and signature help, and their examples are left out of all
-three: a popup is the wrong place for thirty lines of code. There is no help
-browser, and a method's override is not described by its superclass's page,
-since an override usually exists to differ from it.
+**Help is text, not a browser.** The help files supply the words in hover,
+completion and signature help, with the examples left out — a popup is the
+wrong place for thirty lines of code — and a whole page opens as a file with
+the examples in it. There is no browsing between pages: links read as names.
+A method's override is not described by its superclass's page, since an
+override usually exists to differ from it.
+
+**An example is changed only so it runs where it stands.** One written across
+several lines, or declaring `var`s, is wrapped in `( … )` so the usual key runs
+all of it; a last statement with no `;` gets one so it cannot run into the next
+example; and what does not parse — pseudo-code, class definitions, shell
+commands — is a comment. Of the 4,439 examples in the stock help, 3,522 are
+untouched.
 
 ## Why you can trust it
 

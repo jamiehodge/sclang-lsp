@@ -1853,3 +1853,105 @@ fn a_help_page_changed_on_disk_is_read_again() {
     assert!(text.contains("Rewritten."), "{text}");
     assert!(!text.contains("Generates a sine wave."), "{text}");
 }
+
+#[test]
+fn a_class_with_a_help_page_offers_to_open_it() {
+    let mut h = Harness::start("help-action", &documented_library());
+    let uri = h.open("Test.scd", "SinOsc.ar(440); Saw.ar(1)");
+    let range = |c| Range::new(Position::new(0, c), Position::new(0, c));
+
+    let actions: Option<CodeActionResponse> = h.request(
+        "textDocument/codeAction",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "range": range(2),
+            "context": { "diagnostics": [] },
+        }),
+    );
+    let actions = actions.expect("an action on SinOsc");
+    let [CodeActionOrCommand::CodeAction(action)] = actions.as_slice() else {
+        panic!("expected one code action: {actions:?}");
+    };
+    assert_eq!(action.title, "Open help for SinOsc");
+    assert_eq!(action.command.as_ref().unwrap().command, "sclang.showHelp");
+
+    // Saw has no page, so there is nothing to offer.
+    let none: Option<CodeActionResponse> = h.request(
+        "textDocument/codeAction",
+        serde_json::json!({
+            "textDocument": { "uri": uri },
+            "range": range(17),
+            "context": { "diagnostics": [] },
+        }),
+    );
+    assert!(none.as_ref().is_none_or(|a| a.is_empty()), "{none:?}");
+}
+
+#[test]
+fn opening_help_writes_a_runnable_page_and_shows_it_at_the_entry() {
+    let mut h = Harness::start("help-page", &documented_library());
+    let result: Option<String> = h.request(
+        "workspace/executeCommand",
+        serde_json::json!({
+            "command": "sclang.showHelp",
+            "arguments": [{ "class": "SinOsc", "method": "kr", "classSide": true }],
+        }),
+    );
+    let uri = Url::parse(&result.expect("the page's uri")).unwrap();
+    let path = uri.to_file_path().unwrap();
+    assert!(path.starts_with(h.dir.join("help-pages")), "{path:?}");
+
+    let page = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        page.starts_with("// SinOsc: Interpolating sine wavetable oscillator."),
+        "{page}"
+    );
+    // Prose is commented; the example is code.
+    assert!(page.contains("\n// Generates a sine wave.\n"), "{page}");
+    assert!(page.contains("\n{ SinOsc.ar(440) }.play;\n"), "{page}");
+    // The page as a whole is something an editor can parse.
+    assert!(sclang_syntax::parse_script(&page).is_ok(), "{page}");
+
+    let params: ShowDocumentParams =
+        serde_json::from_value(h.await_server_request("window/showDocument")).unwrap();
+    assert_eq!(params.uri, uri);
+    assert_eq!(params.take_focus, Some(true));
+    // `kr` is documented with `ar`; the entry starts at its first signature.
+    let line = params.selection.unwrap().start.line as usize;
+    assert!(
+        page.lines().nth(line).unwrap().starts_with("// SinOsc.ar("),
+        "line {line} of\n{page}"
+    );
+}
+
+#[test]
+fn opening_help_from_a_position_finds_the_word_there() {
+    let mut h = Harness::start("help-position", &documented_library());
+    let uri = h.open("Test.scd", "SinOsc.ar(440)");
+    let result: Option<String> = h.request(
+        "workspace/executeCommand",
+        serde_json::json!({
+            "command": "sclang.showHelp",
+            "arguments": [{ "textDocument": { "uri": uri }, "position": { "line": 0, "character": 8 } }],
+        }),
+    );
+    assert!(result.expect("a page").ends_with("Classes/SinOsc.scd"));
+}
+
+#[test]
+fn no_page_is_said_rather_than_opened() {
+    let mut h = Harness::start("help-missing", &documented_library());
+    let id = h.send_request(
+        "workspace/executeCommand",
+        serde_json::json!({
+            "command": "sclang.showHelp",
+            "arguments": [{ "class": "Saw" }],
+        }),
+    );
+    // The message goes out before the answer does.
+    let message: ShowMessageParams =
+        serde_json::from_value(h.await_notification("window/showMessage")).unwrap();
+    assert_eq!(message.message, "No help page for Saw.");
+    let response = h.await_response(id);
+    assert_eq!(response.result, Some(serde_json::Value::Null));
+}

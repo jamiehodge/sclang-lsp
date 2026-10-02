@@ -27,7 +27,7 @@ mod help;
 mod symbols;
 
 pub use build::{is_class_method, symbols_of, FileSymbols};
-pub use help::{class_of, ClassHelp, HelpIndex, MethodHelp, Skipped};
+pub use help::{class_of, copy_target, ClassHelp, HelpIndex, MethodHelp, Skipped};
 pub use symbols::*;
 
 use std::collections::{BTreeMap, BTreeSet};
