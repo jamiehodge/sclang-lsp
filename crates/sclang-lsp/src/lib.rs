@@ -5,6 +5,7 @@
 //! why running code is the editor's job rather than the language server's.
 
 pub mod analysis;
+pub mod docs;
 pub mod documents;
 pub mod features;
 pub mod line_index;

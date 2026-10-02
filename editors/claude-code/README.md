@@ -45,7 +45,7 @@ it in both places.
 
 | | |
 |---|---|
-| `hover` | Signature, superclass chain, and the comment above the definition |
+| `hover` | Signature, superclass chain, and what the help page says — or the comment above the definition where there is none |
 | `goToDefinition` | Exact for a class, a class receiver or a local; every implementor otherwise |
 | `goToImplementation` | Every class defining a selector; on a class name, its subclasses |
 | `findReferences` | Exact for a local or a class name; textual for a selector, since dispatch is dynamic |

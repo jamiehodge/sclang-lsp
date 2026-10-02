@@ -2,7 +2,7 @@
 
 mod harness;
 
-use harness::{animal_library, mini_library, Harness};
+use harness::{animal_library, documented_library, mini_library, Harness};
 use lsp_types::*;
 
 #[test]
@@ -771,10 +771,14 @@ fn a_file_watch_is_registered_when_the_client_can_honour_one() {
         .expect("a watch registration");
     let options: DidChangeWatchedFilesRegistrationOptions =
         serde_json::from_value(registration.register_options.clone().unwrap()).unwrap();
+    let globs: Vec<_> = options.watchers.iter().map(|w| &w.glob_pattern).collect();
     assert_eq!(
-        options.watchers[0].glob_pattern,
-        GlobPattern::String("**/*.sc".to_string()),
-        "class files only: a .scd is a script, not a file of definitions"
+        globs,
+        [
+            &GlobPattern::String("**/*.sc".to_string()),
+            &GlobPattern::String("**/*.schelp".to_string()),
+        ],
+        "class files and help files: a .scd is a script, not a file of definitions"
     );
 }
 
@@ -1746,4 +1750,106 @@ fn an_unknown_receiver_is_not_ranked_by_a_chain_it_does_not_have() {
     assert!(!items.is_empty());
     // Nothing to rank against, so the client's own ordering stands.
     assert!(items.iter().all(|i| i.sort_text.is_none()), "{items:?}");
+}
+
+fn hover_text(h: &mut Harness, uri: &Url, line: u32, character: u32) -> String {
+    let hover: Hover = h.request_at("textDocument/hover", uri, line, character);
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markup");
+    };
+    markup.value
+}
+
+#[test]
+fn hover_on_a_class_reads_its_help_page() {
+    let mut h = Harness::start("help-class", &documented_library());
+    let uri = h.open("Test.scd", "SinOsc.ar(440)");
+
+    let text = hover_text(&mut h, &uri, 0, 2);
+    assert!(text.contains("SinOsc : UGen"), "{text}");
+    assert!(
+        text.contains("Interpolating sine wavetable oscillator.\n\nGenerates a sine wave."),
+        "{text}"
+    );
+    // The help page wins over the comment above the class.
+    assert!(!text.contains("A sine oscillator."), "{text}");
+}
+
+#[test]
+fn hover_on_a_method_reads_its_entry_without_the_examples() {
+    let mut h = Harness::start("help-method", &documented_library());
+    let uri = h.open("Test.scd", "SinOsc.kr(440)");
+
+    // `kr` shares `ar`'s entry: `method:: ar, kr`.
+    let text = hover_text(&mut h, &uri, 0, 8);
+    assert!(text.contains("Makes one."), "{text}");
+    assert!(text.contains("- `freq` — Frequency in Hertz."), "{text}");
+    assert!(text.contains("**Returns** A UGen."), "{text}");
+    assert!(
+        !text.contains(".play"),
+        "examples stay out of a hover: {text}"
+    );
+}
+
+#[test]
+fn a_method_with_no_help_falls_back_to_its_comment() {
+    let mut h = Harness::start("help-fallback", &documented_library());
+    let uri = h.open("Test.scd", "SinOsc.multiNew(1)");
+
+    let text = hover_text(&mut h, &uri, 0, 9);
+    assert!(text.contains("Base class for unit generators."), "{text}");
+}
+
+#[test]
+fn signature_help_describes_each_parameter_from_help() {
+    let mut h = Harness::start("help-signature", &documented_library());
+    let uri = h.open("Test.scd", "SinOsc.ar(440, ");
+
+    let help: SignatureHelp = h.request_at("textDocument/signatureHelp", &uri, 0, 15);
+    let signature = &help.signatures[0];
+    let doc = |d: &Option<Documentation>| match d {
+        Some(Documentation::MarkupContent(m)) => m.value.clone(),
+        other => panic!("expected markdown, got {other:?}"),
+    };
+    assert_eq!(doc(&signature.documentation), "Makes one.");
+    let params = signature.parameters.as_ref().unwrap();
+    assert_eq!(doc(&params[1].documentation), "Phase in radians.");
+    // Documented by nobody.
+    assert!(params[3].documentation.is_none());
+}
+
+#[test]
+fn completion_fills_in_help_when_an_item_is_resolved() {
+    let mut h = Harness::start("help-resolve", &documented_library());
+    let uri = h.open("Test.scd", "SinOsc.");
+
+    let response: CompletionResponse = h.request_at("textDocument/completion", &uri, 0, 7);
+    let CompletionResponse::List(list) = response else {
+        panic!("expected a completion list");
+    };
+    let ar = list.items.into_iter().find(|i| i.label == "ar").unwrap();
+
+    let resolved: CompletionItem =
+        h.request("completionItem/resolve", serde_json::to_value(&ar).unwrap());
+    let Some(Documentation::MarkupContent(doc)) = resolved.documentation else {
+        panic!("expected documentation");
+    };
+    assert!(doc.value.starts_with("Makes one."), "{}", doc.value);
+}
+
+#[test]
+fn a_help_page_changed_on_disk_is_read_again() {
+    let mut h = Harness::start("help-watch", &documented_library());
+    let uri = h.open("Test.scd", "SinOsc.ar(440)");
+    let path = h.dir.join("HelpSource/Classes/SinOsc.schelp");
+    std::fs::write(&path, "class:: SinOsc\nsummary:: Rewritten.\n").unwrap();
+
+    h.send_notification(
+        "workspace/didChangeWatchedFiles",
+        serde_json::json!({ "changes": [{ "uri": Url::from_file_path(&path).unwrap(), "type": 2 }] }),
+    );
+
+    let text = hover_text(&mut h, &uri, 0, 2);
+    assert!(text.contains("Rewritten."), "{text}");
+    assert!(!text.contains("Generates a sine wave."), "{text}");
 }

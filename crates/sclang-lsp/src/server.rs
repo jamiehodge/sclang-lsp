@@ -18,7 +18,7 @@ use lsp_types::notification::Notification as _;
 use lsp_types::request::Request as _;
 use lsp_types::*;
 use sclang_index::SymbolIndex;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Everything the request path reads.
 pub struct Server {
@@ -150,13 +150,19 @@ impl Server {
         }
         let s = scan.stats;
         let message = format!(
-            "indexed {} files: {} classes, {} methods, {} occurrences{}",
+            "indexed {} files: {} classes, {} methods, {} occurrences{}; {} help files{}",
             s.files,
             s.classes,
             s.methods,
             s.occurrences,
             if s.unreadable > 0 {
                 format!(" ({} not valid UTF-8, skipped)", s.unreadable)
+            } else {
+                String::new()
+            },
+            s.help_files,
+            if s.help_invalid > 0 {
+                format!(" ({} did not parse)", s.help_invalid)
             } else {
                 String::new()
             }
@@ -182,6 +188,10 @@ impl Server {
                 let (doc, offset) = s.locate(&p.text_document_position)?;
                 Some(features::completion::completion(doc, &s.index, offset))
             }),
+            request::ResolveCompletionItem::METHOD => self
+                .handle::<request::ResolveCompletionItem>(req, |s, item| {
+                    features::completion::resolve(&s.index, item)
+                }),
             request::SignatureHelpRequest::METHOD => {
                 self.handle::<request::SignatureHelpRequest>(req, |s, p| {
                     let (doc, offset) = s.locate(&p.text_document_position_params)?;
@@ -484,7 +494,7 @@ impl Server {
         }
     }
 
-    /// Ask the client to report `.sc` files changing on disk.
+    /// Ask the client to report class and help files changing on disk.
     ///
     /// Without this the index only ever hears about files the editor has open,
     /// so a `git checkout`, a quark install, or an edit made in another
@@ -492,7 +502,7 @@ impl Server {
     /// Nothing announces that; the answers are simply wrong, which is the
     /// worst way for an index to fail.
     ///
-    /// `.sc` only, matching what the startup scan reads. A `.scd` is a script
+    /// `.sc` and `.schelp`, matching what the startup scan reads. A `.scd` is a script
     /// meant to be evaluated rather than a file of class definitions, and
     /// several in the stock library do not parse as a whole file by design.
     fn watch_class_files(&mut self) {
@@ -500,11 +510,19 @@ impl Server {
             return;
         }
         let options = DidChangeWatchedFilesRegistrationOptions {
-            watchers: vec![FileSystemWatcher {
-                glob_pattern: GlobPattern::String("**/*.sc".to_string()),
-                // Omitted means create, change and delete, which is all three.
-                kind: None,
-            }],
+            // Omitted kinds mean create, change and delete, which is all
+            // three.
+            watchers: vec![
+                FileSystemWatcher {
+                    glob_pattern: GlobPattern::String("**/*.sc".to_string()),
+                    kind: None,
+                },
+                // Class help, for whoever is writing a quark's.
+                FileSystemWatcher {
+                    glob_pattern: GlobPattern::String("**/*.schelp".to_string()),
+                    kind: None,
+                },
+            ],
         };
         let params = RegistrationParams {
             registrations: vec![Registration {
@@ -534,10 +552,14 @@ impl Server {
     /// on disk beneath an unsaved edit is the stale copy — and saving already
     /// re-indexes through `didSave`.
     fn disk_changed(&mut self, uri: &Url, change: FileChangeType) {
+        let path = uri_to_path(uri);
+        if path.extension().is_some_and(|e| e == "schelp") {
+            self.help_changed(&path, change);
+            return;
+        }
         if self.docs.get(uri).is_some() {
             return;
         }
-        let path = uri_to_path(uri);
         if path.extension().is_none_or(|e| e != "sc") {
             return;
         }
@@ -559,6 +581,33 @@ impl Server {
                 self.index.remove_file(&path);
                 self.references.remove_file(&path);
             }
+        }
+    }
+
+    /// Re-read one help file. Unlike a class file an open buffer does not
+    /// win: help is only ever read from disk, as sclang reads it, so an
+    /// unsaved page has not changed yet.
+    ///
+    /// The page's `HelpSource` is the nearest directory of that name above
+    /// it, which is the only place `SCDoc` would have found it.
+    fn help_changed(&mut self, path: &Path, change: FileChangeType) {
+        let Some(root) = path
+            .ancestors()
+            .find(|a| a.file_name().is_some_and(|n| n == "HelpSource"))
+        else {
+            return;
+        };
+        let source = (change != FileChangeType::DELETED)
+            .then(|| std::fs::read(path).ok())
+            .flatten();
+        let help = self.index.help_mut();
+        match source {
+            // A page that no longer parses is withdrawn by the attempt, which
+            // is right: sclang would render nothing for it either.
+            Some(bytes) => {
+                let _ = help.index_file(root, path, &bytes);
+            }
+            None => help.remove_file(path),
         }
     }
 
@@ -743,6 +792,8 @@ pub fn capabilities(enc: PositionEncoding) -> ServerCapabilities {
         completion_provider: Some(CompletionOptions {
             // `.` is the only character that changes what completion means.
             trigger_characters: Some(vec![".".to_string()]),
+            // Help text is filled in for the highlighted item only.
+            resolve_provider: Some(true),
             ..Default::default()
         }),
         signature_help_provider: Some(SignatureHelpOptions {

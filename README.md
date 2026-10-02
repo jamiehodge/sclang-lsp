@@ -27,9 +27,9 @@ Every request the server answers:
 | | |
 |---|---|
 | **Diagnostics** | Syntax errors, per keystroke |
-| **Completion** | Parameter names inside a call, then names in scope, then class names. Class-side methods after `Foo.`, inherited ones included; instance methods after `this.`, a literal or a variable whose class is known |
-| **Signature help** | The call being typed, with the current parameter marked. `name:` selects its own parameter rather than its position |
-| **Hover** | Signature, superclass chain, and the comment above the definition. For a local, what kind of binding it is and its default; for a slot a class inherits, which class it comes from |
+| **Completion** | Parameter names inside a call, then names in scope, then class names. Class-side methods after `Foo.`, inherited ones included; instance methods after `this.`, a literal or a variable whose class is known. The highlighted item's help is filled in as you move through the list |
+| **Signature help** | The call being typed, with the current parameter marked and described from its help page. `name:` selects its own parameter rather than its position |
+| **Hover** | Signature, superclass chain, and what the help page says — summary, description, arguments, return value — or the comment above the definition where there is no page. For a local, what kind of binding it is and its default; for a slot a class inherits, which class it comes from |
 | **Goto-definition** | Exact for a class, a local, an inherited class slot, and a receiver whose class is known — a class name, `this`, `super`, a literal, a variable initialised with a constructor; every implementor otherwise |
 | **Goto-implementation** | Every class defining a selector; on a class name, its subclasses |
 | **Find references** | Exact for a local or a class name; textual for a selector, since dispatch is dynamic |
@@ -44,8 +44,9 @@ Every request the server answers:
 
 Unsaved edits count immediately: a class that exists only in a buffer is
 visible to completion everywhere else. Files that change on disk count too —
-the server asks the client to watch `.sc` files, so a `git checkout` or a quark
-install does not leave the index describing code that has moved.
+the server asks the client to watch `.sc` and `.schelp` files, so a
+`git checkout` or a quark install does not leave the index describing code that
+has moved.
 
 ## Install
 
@@ -174,6 +175,10 @@ tree — pass paths in `initializationOptions`:
 { "classLibraryPaths": ["/path/to/SCClassLibrary"] }
 ```
 
+Help is found the way sclang finds it: the `HelpSource` beside the class
+library, and any `HelpSource` inside an extension or a quark. A quark's
+`Classes/Foo.ext.schelp` documents what it adds to `Foo`, and shows up there.
+
 Indexing runs in the background, so startup is immediate. The stock class
 library takes about half a second, after which requests are well under a
 millisecond.
@@ -262,7 +267,11 @@ tree-sitter `indents.scm` in Helix, Zed and Neovim whatever this server knows.
 Vim's `=` and Emacs' TAB do not route through it either. That is a second
 reason a tree-sitter grammar is worth having.
 
-No SCDoc rendering yet.
+**Help is text in a popup, not pages.** The help files supply the words in
+hover, completion and signature help, and their examples are left out of all
+three: a popup is the wrong place for thirty lines of code. There is no help
+browser, and a method's override is not described by its superclass's page,
+since an override usually exists to differ from it.
 
 ## Why you can trust it
 
@@ -280,6 +289,7 @@ That claim is checked rather than asserted, against sclang itself:
 | Symbols, against the compiled class library | 14,484 / 14,490 methods match exactly |
 | Expression structure, against sclang's parse dump | 9,731 / 9,731 method bodies identical |
 | Every `.sc` class file in the corpus | parses |
+| Help files, against upstream's own SCDoc parser | 2,292 / 2,292 parses agree exactly |
 
 [CONFORMANCE.md](CONFORMANCE.md) has the detail, including the five bugs in
 sclang's own parse-tree dumper that had to be fixed before the last of those

@@ -7,12 +7,25 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
 ### Added
 
+- **Help in hover, completion and signature help.** What a class's help page
+  says now appears wherever the server describes it: hover shows the summary
+  and description of a class, and a method's text, arguments and return value;
+  signature help describes the parameter being typed; completion fills in the
+  highlighted item's help through `completionItem/resolve`, so a list of
+  thousands carries none of it until it is looked at. Examples are left out of
+  all three. The comment above a definition is still shown where there is no
+  page.
+
+  Help is found where sclang finds it, a quark's `.ext.schelp` additions and
+  `copymethod::` included, and re-read when a `.schelp` file changes on disk.
+  On the stock 3.13 library, 894 of 1,166 classes have a page and every one of
+  its 198 `copymethod::` entries resolves. The scan reads them in the
+  background with the class library; startup is still under half a second.
+
 - **A parser for help files.** `sclang-scdoc` reads `.schelp` files into the
   tree sclang itself builds from them, ported from upstream's SCDoc lexer and
-  grammar as of 3.14.1. Nothing in the server uses it yet; it is the ground
-  for documentation in hover, completion and signature help, which today show
-  only the comment above a definition. It agrees with upstream's own parser on
-  every help file in 3.13.0 and 3.14.1, and on 48,132 damaged copies of them.
+  grammar as of 3.14.1. It agrees with upstream's own parser on every help
+  file in 3.13.0 and 3.14.1, and on 48,132 damaged copies of them.
 
 ## [0.12.1] — 2026-09-16
 

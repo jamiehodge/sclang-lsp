@@ -40,7 +40,9 @@ impl Harness {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for (file, source) in files {
-            std::fs::write(dir.join(file), source).unwrap();
+            let path = dir.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, source).unwrap();
         }
 
         let (server_conn, client) = Connection::memory();
@@ -284,6 +286,23 @@ pub fn animal_library() -> Vec<(&'static str, &'static str)> {
 
 /// A miniature class library: enough shape to exercise inheritance without
 /// depending on a SuperCollider install.
+/// The mini library, with a help page for `SinOsc` that says something
+/// different from its comments — so a test can tell which one it is reading.
+pub fn documented_library() -> Vec<(&'static str, &'static str)> {
+    let mut files = mini_library();
+    files.push((
+        "HelpSource/Classes/SinOsc.schelp",
+        "class:: SinOsc\nsummary:: Interpolating sine wavetable oscillator.\n\
+         description::\nGenerates a sine wave.\n\
+         classmethods::\nmethod:: ar, kr\nMakes one.\n\
+         argument:: freq\nFrequency in Hertz.\n\
+         argument:: phase\nPhase in radians.\n\
+         returns:: A UGen.\n\
+         examples::\ncode::\n{ SinOsc.ar(440) }.play;\n::\n",
+    ));
+    files
+}
+
 pub fn mini_library() -> Vec<(&'static str, &'static str)> {
     vec![
         (

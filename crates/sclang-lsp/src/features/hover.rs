@@ -1,10 +1,11 @@
 //! Hover.
 //!
 //! What can be said without a running image: a class and its superclass
-//! chain, a method's signature and the comment above it. SCDoc lives in
-//! separate `.schelp` files and is not read yet.
+//! chain, a method's signature, and what its help file says about it — or,
+//! with no help file, the comment above the definition. See `crate::docs`.
 
 use crate::analysis::{enclosing_class_at, point_at, resolve_selector, Bias, Point, Receiver};
+use crate::docs;
 use crate::documents::Document;
 use crate::line_index::PositionEncoding;
 use crate::scope::{class_slot, locals_at, Local, LocalKind, Slot};
@@ -31,7 +32,7 @@ pub fn hover(
             let method = index
                 .method(&owner, &name, MethodKind::Instance)
                 .or_else(|| index.method(&owner, &name, MethodKind::Class))?;
-            method_hover(method)
+            method_hover(index, method)
         }
         Point::Local { name } => {
             match locals_at(root, &doc.text, offset)
@@ -92,7 +93,7 @@ fn class_hover(index: &SymbolIndex, name: &str) -> Option<String> {
         let _ = write!(out, "\n\n{}", chain.join(" → "));
     }
 
-    if let Some(doc) = &class.doc {
+    if let Some(doc) = docs::class(index, class) {
         let _ = write!(out, "\n\n---\n{doc}");
     }
     Some(out)
@@ -105,7 +106,7 @@ fn selector_hover(index: &SymbolIndex, name: &str, receiver: &Receiver) -> Optio
     // the resolution rather than on the receiver's shape: `"a".reverse` and
     // `this.play` resolve as tightly as `SinOsc.ar` does.
     if let Some(method) = resolved.single() {
-        return Some(method_hover(method));
+        return Some(method_hover(index, method));
     }
 
     let methods = resolved.methods;
@@ -181,13 +182,13 @@ fn local_hover(local: &Local) -> String {
     out
 }
 
-fn method_hover(m: &Method) -> String {
+fn method_hover(index: &SymbolIndex, m: &Method) -> String {
     let mut out = format!("```supercollider\n{}.{}\n```", m.owner, m.signature());
     if m.origin == sclang_index::Origin::Accessor {
         // Worth saying: there is no method body to look at.
         out.push_str("\n\n*generated accessor*");
     }
-    if let Some(doc) = &m.doc {
+    if let Some(doc) = docs::method(index, m) {
         let _ = write!(out, "\n\n---\n{doc}");
     }
     out

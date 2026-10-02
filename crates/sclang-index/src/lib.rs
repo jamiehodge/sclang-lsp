@@ -23,9 +23,11 @@
 //! ```
 
 mod build;
+mod help;
 mod symbols;
 
 pub use build::{is_class_method, symbols_of, FileSymbols};
+pub use help::{class_of, ClassHelp, HelpIndex, MethodHelp, Skipped};
 pub use symbols::*;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -53,6 +55,10 @@ pub struct SymbolIndex {
     /// Direct subclasses, for walking the hierarchy downward.
     subclasses: BTreeMap<String, BTreeSet<String>>,
     by_file: BTreeMap<PathBuf, FileEntry>,
+    /// What the help files say about the classes and methods above. Kept
+    /// apart, because it is read from different files and keyed by name
+    /// alone: a page documents a class whether or not the class is indexed.
+    help: HelpIndex,
 }
 
 impl SymbolIndex {
@@ -109,6 +115,15 @@ impl SymbolIndex {
                 }
             }
         }
+    }
+
+    /// Class documentation from `.schelp` files.
+    pub fn help(&self) -> &HelpIndex {
+        &self.help
+    }
+
+    pub fn help_mut(&mut self) -> &mut HelpIndex {
+        &mut self.help
     }
 
     pub fn class_count(&self) -> usize {
