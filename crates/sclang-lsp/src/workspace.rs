@@ -157,6 +157,25 @@ fn platform_roots() -> Vec<PathBuf> {
     candidates
 }
 
+/// Where generated help pages are written: the platform's cache directory,
+/// since they are rebuilt whenever they are opened and nothing is lost if
+/// they go.
+pub fn help_cache_dir() -> PathBuf {
+    let base = if cfg!(target_os = "macos") {
+        home().map(|h| h.join("Library/Caches"))
+    } else if cfg!(target_os = "windows") {
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+    } else {
+        std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| home().map(|h| h.join(".cache")))
+    };
+    base.unwrap_or_else(std::env::temp_dir)
+        .join("sclang-lsp")
+        .join("help")
+}
+
 /// Where sclang keeps `sclang_conf.yaml`.
 ///
 /// The same directory sclang's own `SC_Filesystem` calls `UserConfig`, which

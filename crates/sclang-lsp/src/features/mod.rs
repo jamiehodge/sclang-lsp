@@ -5,6 +5,7 @@ pub mod find_references;
 pub mod folding_range;
 pub mod formatting;
 pub mod goto;
+pub mod help_page;
 pub mod hover;
 pub mod inlay_hints;
 pub mod rename;

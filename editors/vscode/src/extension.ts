@@ -13,6 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
+    ExecuteCommandRequest,
     LanguageClient,
     LanguageClientOptions,
     ServerOptions,
@@ -32,6 +33,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(
         vscode.commands.registerCommand('sclang-lsp.restart', () => restart(context)),
         vscode.commands.registerCommand('sclang-lsp.showLog', () => client?.outputChannel.show()),
+        vscode.commands.registerCommand('sclang-lsp.showHelp', showHelp),
         vscode.workspace.onDidChangeConfiguration(async (event) => {
             // Only the server's own settings feed its startup; the sclang ones
             // are read fresh each time it is launched.
@@ -80,6 +82,29 @@ async function start(context: vscode.ExtensionContext): Promise<void> {
 
     client = new LanguageClient('sclang-lsp', 'SuperCollider Language Server', serverOptions, clientOptions);
     await client.start();
+}
+
+/**
+ * Open the help page for the word under the cursor.
+ *
+ * The server does the work — finding the page, writing it out as a file of
+ * runnable examples, and asking the editor to open it — and offers the same
+ * thing as a code action. This is that action without the lightbulb, so it can
+ * have a key.
+ */
+async function showHelp(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !client) {
+        return;
+    }
+    const position = client.code2ProtocolConverter.asTextDocumentPositionParams(
+        editor.document,
+        editor.selection.active,
+    );
+    await client.sendRequest(ExecuteCommandRequest.type, {
+        command: 'sclang.showHelp',
+        arguments: [position],
+    });
 }
 
 async function restart(context: vscode.ExtensionContext): Promise<void> {

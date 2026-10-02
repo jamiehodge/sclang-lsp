@@ -7,6 +7,19 @@ with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
 ### Added
 
+- **Help pages you can run.** A code action on a class or method name, and the
+  `sclang.showHelp` command behind it, open the class's help page as a `.scd`
+  file — prose as comments, examples as code — at the entry asked for. In the
+  editor the unit of evaluation is a line or a parenthesised region, not a
+  selection in a browser, so an example written across several lines or
+  declaring `var`s is wrapped in `( … )`, and one that does not parse is kept
+  as a comment. Of the 4,439 examples in the stock help, 3,522 are untouched;
+  every one of the 894 class pages parses as a whole file, so none opens with
+  an error in it.
+
+  The VS Code extension adds *Show help for the word under the cursor*, with no
+  default key, since the IDE's <kbd>⌘D</kbd> is VS Code's add-next-match.
+
 - **Help in hover, completion and signature help.** What a class's help page
   says now appears wherever the server describes it: hover shows the summary
   and description of a class, and a method's text, arguments and return value;

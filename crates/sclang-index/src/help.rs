@@ -220,6 +220,12 @@ impl HelpIndex {
         }
     }
 
+    /// The files that make up a class's page, in the order to read them: the
+    /// page, then its additions, each with whether it is one.
+    pub fn files(&self, class: &str) -> Vec<(&Path, bool)> {
+        self.pages(class).map(|(p, f)| (p, f.addition)).collect()
+    }
+
     /// A class's page, then its additions. Should two `HelpSource`
     /// directories both have the page, the first by path is used.
     fn pages(&self, class: &str) -> impl Iterator<Item = (&Path, &HelpFile)> {
@@ -345,18 +351,22 @@ fn collect_methods(node: &Node, out: &mut Vec<Entry>) {
 /// `copymethod:: Bar *new`: the class, then the method with `*` for the
 /// class side, `-` for the instance side, or `.` for a page's free-standing
 /// method, which no class or instance method can be looked up as.
-fn copy_entry(text: &str, kind: MethodKind) -> Option<Entry> {
+pub fn copy_target(text: &str) -> Option<(String, String, MethodKind)> {
     // `findRegexp("[^ ,]+")`: the first two runs of anything but spaces and
     // commas.
     let mut words = text.split([' ', ',']).filter(|w| !w.is_empty());
     let class = words.next()?.to_string();
     let target = words.next()?;
-    let from = match target.chars().next()? {
+    let kind = match target.chars().next()? {
         '*' => MethodKind::Class,
         '-' => MethodKind::Instance,
         _ => return None,
     };
-    let name = target[1..].to_string();
+    Some((class, target[1..].to_string(), kind))
+}
+
+fn copy_entry(text: &str, kind: MethodKind) -> Option<Entry> {
+    let (class, name, from) = copy_target(text)?;
     Some(Entry {
         kind,
         names: vec![name.clone()],

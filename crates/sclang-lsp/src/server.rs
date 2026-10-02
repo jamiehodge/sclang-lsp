@@ -10,7 +10,7 @@ use crate::features;
 use crate::line_index::PositionEncoding;
 use crate::locations::Resolver;
 use crate::references::ReferenceIndex;
-use crate::workspace::{build_index, default_roots, IndexStats, Roots};
+use crate::workspace::{build_index, default_roots, help_cache_dir, IndexStats, Roots};
 
 use crossbeam_channel::{Receiver, Sender};
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
@@ -32,7 +32,13 @@ pub struct Server {
     /// capability for it, so the only way to find out is to read this and
     /// register afterwards.
     watches_files: bool,
-    /// Ids for the requests this server makes. Only registration so far.
+    /// Whether the client can be asked to open a file, which is how a help
+    /// page is shown. Without it the command still answers with the file.
+    shows_documents: bool,
+    /// Where help pages are written for the editor to open.
+    help_dir: PathBuf,
+    /// Ids for the requests this server makes: registration, and opening
+    /// help pages.
     next_request: i32,
     enc: PositionEncoding,
     sender: Sender<Message>,
@@ -60,6 +66,19 @@ impl Server {
             .and_then(|w| w.did_change_watched_files.as_ref())
             .and_then(|w| w.dynamic_registration)
             .unwrap_or(false);
+        let shows_documents = params
+            .capabilities
+            .window
+            .as_ref()
+            .and_then(|w| w.show_document.as_ref())
+            .is_some_and(|s| s.support);
+        let help_dir = params
+            .initialization_options
+            .as_ref()
+            .and_then(|v| v.get("helpDirectory"))
+            .and_then(|v| v.as_str())
+            .map(PathBuf::from)
+            .unwrap_or_else(help_cache_dir);
 
         connection.initialize_finish(id, serde_json::to_value(initialize_result(enc))?)?;
 
@@ -80,6 +99,8 @@ impl Server {
             references: ReferenceIndex::default(),
             tokens: Default::default(),
             watches_files,
+            shows_documents,
+            help_dir,
             next_request: 0,
             enc,
             sender: connection.sender.clone(),
@@ -188,6 +209,28 @@ impl Server {
                 let (doc, offset) = s.locate(&p.text_document_position)?;
                 Some(features::completion::completion(doc, &s.index, offset))
             }),
+            request::CodeActionRequest::METHOD => {
+                self.handle::<request::CodeActionRequest>(req, |s, p| {
+                    let doc = s.docs.get(&p.text_document.uri)?;
+                    let offset = doc.line_index.offset(&doc.text, p.range.start, s.enc);
+                    let target = features::help_page::target_at(doc, &s.index, offset)?;
+                    Some(vec![CodeActionOrCommand::CodeAction(CodeAction {
+                        title: format!("Open help for {}", target.describe()),
+                        command: Some(Command {
+                            title: format!("Open help for {}", target.describe()),
+                            command: SHOW_HELP.to_string(),
+                            arguments: Some(vec![serde_json::to_value(&target).ok()?]),
+                        }),
+                        ..Default::default()
+                    })])
+                })
+            }
+            request::ExecuteCommand::METHOD => {
+                self.handle::<request::ExecuteCommand>(req, |s, p| match p.command.as_str() {
+                    SHOW_HELP => s.show_help(p.arguments.first()),
+                    _ => None,
+                })
+            }
             request::ResolveCompletionItem::METHOD => self
                 .handle::<request::ResolveCompletionItem>(req, |s, item| {
                     features::completion::resolve(&s.index, item)
@@ -431,6 +474,74 @@ impl Server {
         let doc = self.docs.get(&pos.text_document.uri)?;
         let offset = doc.line_index.offset(&doc.text, pos.position, self.enc);
         Some((doc, offset))
+    }
+
+    /// Write a class's help page out and ask the editor to open it.
+    ///
+    /// The argument is a target, as the code action sends, or a position in
+    /// an open document, which is what an editor command bound to a key
+    /// sends. Either way the answer is the page's URI, for a client that
+    /// cannot be asked to open it and wants to do so itself.
+    fn show_help(&mut self, argument: Option<&serde_json::Value>) -> Option<serde_json::Value> {
+        let argument = argument?;
+        let target = match serde_json::from_value::<features::help_page::Target>(argument.clone()) {
+            Ok(target) => Some(target),
+            Err(_) => serde_json::from_value::<TextDocumentPositionParams>(argument.clone())
+                .ok()
+                .and_then(|pos| {
+                    let (doc, offset) = self.locate(&pos)?;
+                    features::help_page::target_at(doc, &self.index, offset)
+                }),
+        };
+        let page = target
+            .as_ref()
+            .and_then(|t| features::help_page::page(&self.index, t));
+        let Some(page) = page else {
+            let what = target.map_or("that".to_string(), |t| t.describe());
+            self.show_message(MessageType::INFO, format!("No help page for {what}."));
+            return None;
+        };
+
+        let path = self.help_dir.join(&page.relative);
+        let written = path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(&path, &page.text));
+        if let Err(e) = written {
+            self.show_message(
+                MessageType::ERROR,
+                format!("Could not write the help page to {}: {e}", path.display()),
+            );
+            return None;
+        }
+        let uri = Url::from_file_path(&path).ok()?;
+
+        if self.shows_documents {
+            let selection = page.line.map(|line| {
+                let at = Position::new(line, 0);
+                Range::new(at, at)
+            });
+            let params = ShowDocumentParams {
+                uri: uri.clone(),
+                external: Some(false),
+                take_focus: Some(true),
+                selection,
+            };
+            self.next_request += 1;
+            self.send(Message::Request(Request {
+                id: RequestId::from(self.next_request),
+                method: request::ShowDocument::METHOD.to_string(),
+                params: serde_json::to_value(params).ok()?,
+            }));
+        }
+        serde_json::to_value(uri.as_str()).ok()
+    }
+
+    fn show_message(&self, typ: MessageType, message: String) {
+        self.send(Message::Notification(Notification::new(
+            notification::ShowMessage::METHOD.to_string(),
+            ShowMessageParams { typ, message },
+        )));
     }
 
     // ---- notifications -----------------------------------------------
@@ -774,6 +885,11 @@ fn initialize_result(enc: PositionEncoding) -> InitializeResult {
     }
 }
 
+/// The command that opens a help page. Named for the server, not the
+/// extension, because a client registers a server's commands as its own and
+/// the extension has a `sclang-lsp.*` namespace of its own to keep.
+pub const SHOW_HELP: &str = "sclang.showHelp";
+
 pub fn capabilities(enc: PositionEncoding) -> ServerCapabilities {
     ServerCapabilities {
         position_encoding: Some(match enc {
@@ -804,6 +920,12 @@ pub fn capabilities(enc: PositionEncoding) -> ServerCapabilities {
         }),
         inlay_hint_provider: Some(OneOf::Left(true)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
+        // One action, on a class or method name: open its help page.
+        code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+        execute_command_provider: Some(ExecuteCommandOptions {
+            commands: vec![SHOW_HELP.to_string()],
+            work_done_progress_options: Default::default(),
+        }),
         definition_provider: Some(OneOf::Left(true)),
         // Every class defining a selector. In a dynamically dispatched
         // language this is the question with a real answer, where definition

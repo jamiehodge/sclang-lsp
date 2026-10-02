@@ -71,9 +71,13 @@ impl Harness {
                 "workspace": {
                     "didChangeWatchedFiles": { "dynamicRegistration": true },
                 },
+                // So a help page is opened as well as written.
+                "window": { "showDocument": { "support": true } },
             },
             "initializationOptions": {
                 "classLibraryPaths": [self.dir.to_str().unwrap()],
+                // Inside the test's own directory, never the user's cache.
+                "helpDirectory": self.dir.join("help-pages").to_str().unwrap(),
             },
         });
         let id = self.send_request("initialize", params);
