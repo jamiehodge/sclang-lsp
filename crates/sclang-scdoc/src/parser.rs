@@ -22,8 +22,9 @@ use crate::{Error, Mode};
 
 type Result<T> = std::result::Result<T, Error>;
 
-pub(crate) fn parse(tokens: &[Token], mode: Mode) -> Result<RawNode> {
+pub(crate) fn parse(src: &[u8], tokens: &[Token], mode: Mode) -> Result<RawNode> {
     let mut p = Parser {
+        src,
         tokens,
         pos: 0,
         method_type: Id::Method,
@@ -34,6 +35,7 @@ pub(crate) fn parse(tokens: &[Token], mode: Mode) -> Result<RawNode> {
 }
 
 struct Parser<'a> {
+    src: &'a [u8],
     tokens: &'a [Token],
     pos: usize,
     /// The global `method_type`: which kind of node `method::` makes, set by
@@ -50,8 +52,8 @@ impl Parser<'_> {
         self.peek() == kind
     }
 
-    fn bump(&mut self) -> &Token {
-        let t = &self.tokens[self.pos];
+    fn bump(&mut self) -> Token {
+        let t = self.tokens[self.pos];
         // `End` is returned forever, as flex does at end of input.
         if t.kind != Tok::End {
             self.pos += 1;
@@ -296,7 +298,7 @@ impl Parser<'_> {
                 let names = self.methnames()?;
                 // optMETHODARGS
                 let args = if self.at(Tok::MethodArgs) {
-                    let args = self.bump().text.clone();
+                    let args = self.bump().text(self.src).to_vec();
                     if self.method_type != Id::Method {
                         return Err(self.error(
                             "METHOD argument string is not allowed inside CLASSMETHODS or INSTANCEMETHODS",
@@ -353,7 +355,7 @@ impl Parser<'_> {
         if !self.at(Tok::MethodName) {
             return Err(self.unexpected());
         }
-        let mut name = self.bump().text.clone();
+        let mut name = self.bump().text(self.src).to_vec();
         if name.last() == Some(&b'_') {
             name.pop();
         }
@@ -579,9 +581,26 @@ impl Parser<'_> {
     }
 
     /// `prose: prose proseelem | proseelem`
+    ///
+    /// Bison makes one `TEXT` node per word and the fixup pass joins adjacent
+    /// ones. Joining them here instead is the same result for a fraction of
+    /// the allocation. Line breaks are left for the fixup, which drops a
+    /// trailing one before it joins anything.
     fn prose(&mut self) -> Result<RawNode> {
-        let mut elems = Vec::new();
+        let mut elems: Vec<RawNode> = Vec::new();
         while self.at_prose() {
+            if matches!(self.peek(), Tok::Text | Tok::Comma) {
+                if let Some(RawNode {
+                    id: Id::Text,
+                    text: Some(prev),
+                    ..
+                }) = elems.last_mut()
+                {
+                    let t = self.bump();
+                    prev.extend_from_slice(t.text(self.src));
+                    continue;
+                }
+            }
             elems.push(self.proseelem()?);
         }
         Ok(RawNode::new(Id::Prose, None, elems))
@@ -591,7 +610,7 @@ impl Parser<'_> {
     /// `         | FOOTNOTE body TAGSYM | NEWLINE`
     fn proseelem(&mut self) -> Result<RawNode> {
         let t = self.bump();
-        let (kind, text) = (t.kind, t.text.clone());
+        let (kind, text) = (t.kind, t.text(self.src).to_vec());
         let inline = |id| (id, None, Vec::new());
         let (id, text, children) = match kind {
             Tok::Text | Tok::Comma => (Id::Text, Some(text), Vec::new()),
@@ -632,7 +651,7 @@ impl Parser<'_> {
         }
         let mut out = Vec::new();
         while ok(self.peek()) {
-            out.extend_from_slice(&self.bump().text);
+            out.extend_from_slice(self.bump().text(self.src));
         }
         Ok(out)
     }
@@ -659,7 +678,7 @@ impl Parser<'_> {
             let t = self.bump();
             match t.kind {
                 Tok::Newline | Tok::EmptyLines => out.push(b'\n'),
-                _ => out.extend_from_slice(&t.text),
+                _ => out.extend_from_slice(t.text(self.src)),
             }
         }
         Ok(out)
