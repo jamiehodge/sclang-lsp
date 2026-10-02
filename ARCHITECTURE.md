@@ -43,6 +43,12 @@ live image for `~envir` contents, SCDoc rendering and evaluation. That idea is
 dropped. Everything needing a running image belongs to the editor, which is
 already managing one for the user.
 
+SCDoc turned out not to need one either. A help file is a `.schelp` text file
+sitting next to the class library, and the HTML sclang renders from it is a
+build product that only exists once someone has opened that page. Reading the
+source is the same move as reading `.sc` files: `sclang-scdoc` is a port of
+upstream's own SCDoc parser, so the tree is the one sclang would build.
+
 The cost of dropping it is small and specific, and it is listed under
 *Deliberately not done* below rather than hidden.
 

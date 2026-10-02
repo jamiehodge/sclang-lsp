@@ -38,6 +38,7 @@ new toolchain does not turn an unrelated pull request red.
 |---|---|
 | `crates/sclang-syntax` | Lexer, parser, and the lossless tree |
 | `crates/sclang-index` | Classes, methods and their locations |
+| `crates/sclang-scdoc` | The help-file format, SCDoc |
 | `crates/sclang-lsp` | The server, and one module per LSP request |
 | `editors/vscode` | The extension |
 | `oracle/` | Differential checks against a real sclang |
