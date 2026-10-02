@@ -15,6 +15,7 @@
 //! ```
 
 mod lexer;
+pub mod markdown;
 mod parser;
 mod tree;
 

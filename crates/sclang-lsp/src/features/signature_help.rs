@@ -7,6 +7,7 @@
 //! shape for saying so.
 
 use crate::analysis::{call_at, resolve_selector};
+use crate::docs;
 use crate::documents::Document;
 use sclang_index::{Method, SymbolIndex};
 use sclang_syntax::{SyntaxKind, SyntaxNode};
@@ -35,7 +36,7 @@ pub fn signature_help(doc: &Document, index: &SymbolIndex, offset: u32) -> Optio
     let signatures: Vec<_> = methods
         .iter()
         .take(MAX_SIGNATURES)
-        .map(|m| signature_of(m))
+        .map(|m| signature_of(index, m))
         .collect();
 
     Some(SignatureHelp {
@@ -77,7 +78,11 @@ fn keyword_at(arg_list: &SyntaxNode, source: &str, offset: u32) -> Option<String
 ///
 /// The offsets are UTF-16 units because that is what the protocol counts them
 /// in, regardless of what encoding was negotiated for document positions.
-fn signature_of(method: &Method) -> SignatureInformation {
+///
+/// The help file's description of the method goes on the signature, and its
+/// description of each argument on that parameter, which is what an editor
+/// shows beside the one being typed.
+fn signature_of(index: &SymbolIndex, method: &Method) -> SignatureInformation {
     let mut label = String::new();
     label.push_str(&method.owner);
     label.push('.');
@@ -105,22 +110,24 @@ fn signature_of(method: &Method) -> SignatureInformation {
 
         parameters.push(ParameterInformation {
             label: ParameterLabel::LabelOffsets([start, end]),
-            documentation: None,
+            documentation: docs::argument(index, method, &arg.name).map(markdown),
         });
     }
     label.push(')');
 
     SignatureInformation {
         label,
-        documentation: method.doc.as_ref().map(|d| {
-            Documentation::MarkupContent(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: d.clone(),
-            })
-        }),
+        documentation: docs::method_summary(index, method).map(markdown),
         parameters: Some(parameters),
         active_parameter: None,
     }
+}
+
+fn markdown(value: String) -> Documentation {
+    Documentation::MarkupContent(MarkupContent {
+        kind: MarkupKind::Markdown,
+        value,
+    })
 }
 
 fn utf16_len(s: &str) -> u32 {

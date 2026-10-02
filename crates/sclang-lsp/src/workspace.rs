@@ -26,6 +26,11 @@ pub struct IndexStats {
     pub methods: usize,
     /// Name occurrences recorded for find-references.
     pub occurrences: usize,
+    /// Class help pages and additions read.
+    pub help_files: usize,
+    /// Class help pages that do not parse, which sclang would render nothing
+    /// for either.
+    pub help_invalid: usize,
 }
 
 /// Where to look for class files, and what to skip inside it.
@@ -347,6 +352,67 @@ pub fn collect_sc_files(root: &Path, roots: &Roots) -> Vec<PathBuf> {
     out
 }
 
+/// The `HelpSource` directories sclang would read help from, given these
+/// roots.
+///
+/// `SCDoc.helpSourceDirs` is the stock one, beside the class library, and then
+/// every directory named `HelpSource` under the extension directories and
+/// `includePaths` — which is where a quark keeps its own. The class-library
+/// root stands in for the first: `HelpSource` is its sibling.
+pub fn help_source_dirs(roots: &Roots) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for root in &roots.include {
+        if root.file_name().is_some_and(|n| n == "SCClassLibrary") {
+            if let Some(stock) = root.parent().map(|p| p.join("HelpSource")) {
+                if stock.is_dir() && !roots.excludes(&stock) {
+                    out.push(stock);
+                }
+            }
+        }
+        if roots.excludes(root) {
+            continue;
+        }
+        let mut stack = vec![root.clone()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                // Not following symlinks, for the reason `collect_sc_files`
+                // gives.
+                if !entry.file_type().is_ok_and(|t| t.is_dir()) || roots.excludes(&path) {
+                    continue;
+                }
+                // sclang does not look inside a `HelpSource` for another.
+                if entry.file_name() == "HelpSource" {
+                    out.push(path);
+                } else {
+                    stack.push(path);
+                }
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The class pages in a `HelpSource` directory, and additions to them. Guides
+/// and the rest are not read until something asks for a whole page.
+pub fn collect_class_help(help_source: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(help_source.join("Classes")) else {
+        return Vec::new();
+    };
+    let mut out: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| sclang_index::class_of(help_source, p).is_some())
+        .collect();
+    out.sort();
+    out
+}
+
 /// Index every `.sc` file under each root.
 ///
 /// Both indexes are built from the same read, since the expensive parts are
@@ -365,6 +431,21 @@ pub fn build_index(roots: &Roots) -> (SymbolIndex, ReferenceIndex, IndexStats) {
                     stats.files += 1;
                 }
                 Err(_) => stats.unreadable += 1,
+            }
+        }
+    }
+
+    for help_source in help_source_dirs(roots) {
+        for path in collect_class_help(&help_source) {
+            // Bytes, not a string: help files predate any agreement on
+            // encoding, and upstream's parser does not care either.
+            let Ok(source) = std::fs::read(&path) else {
+                continue;
+            };
+            match index.help_mut().index_file(&help_source, &path, &source) {
+                Ok(()) => stats.help_files += 1,
+                Err(sclang_index::Skipped::Invalid(_)) => stats.help_invalid += 1,
+                Err(sclang_index::Skipped::NotAClass) => {}
             }
         }
     }
@@ -576,6 +657,64 @@ mod tests {
         assert!(index.class("A").is_some());
         assert!(index.class("B").is_none());
         assert!(index.class("C").is_none());
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn help_is_found_where_sclang_looks_for_it() {
+        let dir = temp_dir("help");
+        let write = |rel: &str, text: &str| {
+            let path = dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write("SCClassLibrary/A.sc", "A { }");
+        // The stock pages sit beside the class library, not in it.
+        write(
+            "HelpSource/Classes/A.schelp",
+            "class:: A\nsummary:: Stock.\n",
+        );
+        write(
+            "HelpSource/Guides/G.schelp",
+            "title:: G\nsummary:: A guide.\n",
+        );
+        write("HelpSource/Classes/Bad.schelp", "class::\n");
+        // A quark keeps its own, at any depth.
+        write("quarks/Q/Q.sc", "Q { }");
+        write(
+            "quarks/Q/HelpSource/Classes/Q.schelp",
+            "class:: Q\nsummary:: Mine.\n",
+        );
+        write(
+            "quarks/Q/HelpSource/Classes/A.ext.schelp",
+            "instancemethods::\nmethod:: q\nAdded by Q.\n",
+        );
+        write(
+            "quarks/Skip/HelpSource/Classes/S.schelp",
+            "class:: S\nsummary:: s\n",
+        );
+
+        let roots = Roots {
+            include: vec![dir.join("SCClassLibrary"), dir.join("quarks")],
+            exclude: vec![dir.join("quarks/Skip")],
+        };
+        assert_eq!(
+            help_source_dirs(&roots),
+            vec![dir.join("HelpSource"), dir.join("quarks/Q/HelpSource")]
+        );
+
+        let (index, _references, stats) = build_index(&roots);
+        // A, Q and the addition; the guide is not a class page.
+        assert_eq!(stats.help_files, 3);
+        assert_eq!(stats.help_invalid, 1);
+        let help = index.help();
+        assert_eq!(help.class("A").unwrap().summary, Some("Stock."));
+        assert_eq!(help.class("Q").unwrap().summary, Some("Mine."));
+        assert!(help
+            .method("A", "q", sclang_index::MethodKind::Instance)
+            .is_some());
+        assert!(help.class("S").is_none());
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

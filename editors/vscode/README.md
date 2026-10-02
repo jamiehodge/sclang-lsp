@@ -3,7 +3,7 @@
 Language features for SuperCollider, and an sclang to run your code in.
 
 **Reading code** — completion that knows the class library, hover with real
-signatures, goto-definition, find-references, rename, symbols, inlay hints,
+signatures and the help pages' text, goto-definition, find-references, rename, symbols, inlay hints,
 parse-accurate syntax colouring, and syntax errors as you type. All of it comes
 from parsing, so it works on code that does not compile and while sclang is
 busy.

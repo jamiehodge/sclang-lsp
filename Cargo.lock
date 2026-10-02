@@ -234,6 +234,7 @@ dependencies = [
 name = "sclang-index"
 version = "0.12.1"
 dependencies = [
+ "sclang-scdoc",
  "sclang-syntax",
 ]
 
@@ -245,6 +246,7 @@ dependencies = [
  "lsp-server",
  "lsp-types",
  "sclang-index",
+ "sclang-scdoc",
  "sclang-syntax",
  "serde",
  "serde_json",

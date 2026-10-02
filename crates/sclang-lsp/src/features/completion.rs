@@ -8,6 +8,7 @@
 use crate::analysis::{
     call_at, enclosing_class_at, resolve_selector, token_at, Bias, Receiver, ReceiverContext,
 };
+use crate::docs;
 use crate::documents::Document;
 use crate::scope::{class_slots, locals_at, Local, LocalKind, Slot};
 use sclang_index::{Method, MethodKind, SymbolIndex};
@@ -243,6 +244,8 @@ fn push_selectors_by_name(
                 first.signature(),
                 implementors.len() - 1
             ));
+            // Which implementor's help to show is a guess, so none is.
+            item.data = None;
         }
         items.push(item);
     }
@@ -371,6 +374,12 @@ fn method_item(m: &Method, on_class: Option<&str>) -> CompletionItem {
         kind: Some(CompletionItemKind::METHOD),
         detail: Some(detail),
         documentation: m.doc.as_deref().map(markdown),
+        data: serde_json::to_value(Resolve::Method {
+            owner: m.owner.clone(),
+            name: m.name.clone(),
+            class_side: m.kind == MethodKind::Class,
+        })
+        .ok(),
         ..Default::default()
     }
 }
@@ -381,8 +390,65 @@ fn class_item(c: &sclang_index::Class) -> CompletionItem {
         kind: Some(CompletionItemKind::CLASS),
         detail: c.superclass.as_ref().map(|s| format!(": {s}")),
         documentation: c.doc.as_deref().map(markdown),
+        data: serde_json::to_value(Resolve::Class {
+            name: c.name.clone(),
+        })
+        .ok(),
         ..Default::default()
     }
+}
+
+/// What a completion item needs to find its documentation again.
+///
+/// Help text is looked up only for the item the user is looking at, through
+/// `completionItem/resolve`. Attached to every item it would be the whole
+/// class library's help in one response when completing a class name. The
+/// comment above a definition is still attached up front, as before, for a
+/// client that never resolves.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(tag = "resolve", rename_all = "camelCase")]
+enum Resolve {
+    Class {
+        name: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    Method {
+        owner: String,
+        name: String,
+        class_side: bool,
+    },
+}
+
+/// Fill in an item's documentation from its help, if it has any.
+pub fn resolve(index: &SymbolIndex, mut item: CompletionItem) -> CompletionItem {
+    let Some(data) = item.data.clone() else {
+        return item;
+    };
+    let doc = match serde_json::from_value(data) {
+        Ok(Resolve::Class { name }) => match index.class(&name) {
+            Some(class) => docs::class(index, class),
+            None => docs::class_by_name(index, &name),
+        },
+        Ok(Resolve::Method {
+            owner,
+            name,
+            class_side,
+        }) => {
+            let kind = if class_side {
+                MethodKind::Class
+            } else {
+                MethodKind::Instance
+            };
+            index
+                .method(&owner, &name, kind)
+                .and_then(|m| docs::method(index, m))
+        }
+        Err(_) => None,
+    };
+    if let Some(doc) = doc {
+        item.documentation = Some(markdown(&doc));
+    }
+    item
 }
 
 fn markdown(text: &str) -> Documentation {
