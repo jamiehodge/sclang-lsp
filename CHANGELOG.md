@@ -3,7 +3,7 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
-## Unreleased
+## [0.13.0] — 2026-10-03
 
 ### Added
 
