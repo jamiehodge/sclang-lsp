@@ -64,11 +64,11 @@ only add a second place for the server's state to be wrong.
 
 ## Help pages
 
-*Show help for the word under the cursor* opens a class's help page as a
-SuperCollider file: the prose as comments and the examples as code, so
-<kbd>⌘⏎</kbd> runs them where they are. It opens at the method under the
-cursor, if that is what it was. The lightbulb offers the same thing on any
-class or method that has a page.
+Right-click a class or method name and choose *Show Help*: its help page opens
+as a SuperCollider file, the prose as comments and the examples as code, so
+<kbd>⌘⏎</kbd> runs them where they are. It opens at the method, if that is what
+was clicked. The lightbulb offers the same thing on any class or method that
+has a page.
 
 It has no key by default. The IDE's is <kbd>⌘D</kbd>, which VS Code already
 uses to add the next match to the selection; to take it over in SuperCollider
@@ -115,7 +115,7 @@ competing with it for CPU.
 | `Evaluate code` | Takes its code as an argument, for your own bindings |
 | `Start sclang` / `Stop sclang` / `Restart sclang` | |
 | `Show post window` | |
-| `Show help for the word under the cursor` | No default key; see *Help pages* |
+| `Show Help` | In the editor's right-click menu; see *Help pages* |
 | `Restart language server` / `Show server log` | |
 
 ## Settings

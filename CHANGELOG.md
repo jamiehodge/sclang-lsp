@@ -3,6 +3,15 @@
 Notable changes, newest first. Versions follow [semver](https://semver.org),
 with the usual pre-1.0 caveat that the minor number carries breaking changes.
 
+## Unreleased
+
+### Changed
+
+- **Show Help is in the editor's right-click menu** in SuperCollider files,
+  beside Go to Definition, and is called that in the Command Palette too. It
+  still has no default key: the IDE's ⌘D is VS Code's add-next-match, and the
+  README shows the one line that takes it over.
+
 ## [0.13.0] — 2026-10-03
 
 ### Added

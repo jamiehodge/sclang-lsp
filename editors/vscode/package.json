@@ -92,7 +92,7 @@
       },
       {
         "command": "sclang-lsp.showHelp",
-        "title": "Show help for the word under the cursor",
+        "title": "Show Help",
         "category": "SuperCollider"
       },
       {
@@ -156,6 +156,15 @@
           "markdownDescription": "Publish class-library compile errors as diagnostics. These are printed before any image exists, so holding sclang's output is the only way to see them."
         }
       }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "sclang-lsp.showHelp",
+          "when": "editorLangId == supercollider",
+          "group": "navigation"
+        }
+      ]
     },
     "keybindings": [
       {
